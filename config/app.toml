@@ -1,0 +1,1 @@
+registers = [ "App\\System\\App", "App\\Install\\App", "App\\Data\\App", "App\\Boot\\App" ]

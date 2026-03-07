@@ -1,0 +1,41 @@
+{
+    "name": "duxweb/boot",
+    "description": "Robot Gateway Application",
+    "version": "0.0.1",
+    "phpDependencies": [],
+    "adminMenu": [
+        {
+            "type": "directory",
+            "label": "机器人配置",
+            "name": "boot",
+            "label_lang": "boot",
+            "path": null,
+            "loader": null,
+            "hidden": false,
+            "sort": 910,
+            "parent": "system",
+            "children": [
+                {
+                    "type": "menu",
+                    "label": "机器人管理",
+                    "name": "boot.bot.list",
+                    "label_lang": "boot.bot.list",
+                    "path": "boot/bot",
+                    "loader": "Boot/Bot/table",
+                    "hidden": false,
+                    "sort": 1
+                },
+                {
+                    "type": "menu",
+                    "label": "机器人日志",
+                    "name": "boot.log.list",
+                    "label_lang": "boot.log.list",
+                    "path": "boot/log",
+                    "loader": "Boot/Log/table",
+                    "hidden": false,
+                    "sort": 2
+                }
+            ]
+        }
+    ]
+}
