@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/duxweb/dux-ai-docs" target="_blank">中文文档</a> |
+  <a href="https://ai.docs.dux.plus/" target="_blank">中文文档</a> |
   <a href="https://github.com/duxweb/dux-ai" target="_blank">GitHub</a> |
   <a href="https://github.com/duxweb/dux-php-admin" target="_blank">Dux PHP Admin</a>
 </p>
