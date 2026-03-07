@@ -20,6 +20,9 @@
   <img alt="Version" src="https://img.shields.io/badge/version-v1.0-orange.svg" />
 </p>
 
+<p align="center">
+<img src="https://ai.docs.dux.plus/hero.png" width="100%" />
+</p>
 ---
 
 ## 项目定位
