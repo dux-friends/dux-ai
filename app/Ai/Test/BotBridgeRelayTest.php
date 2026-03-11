@@ -20,7 +20,7 @@ beforeEach(function () {
     TestApp::refreshDatabase();
 });
 
-it('机器人回写：assistant 错误占位消息不会转发到机器人通道', function () {
+it('机器人回写：assistant 错误消息会转发为友好文案', function () {
     $bot = BootBot::query()->create([
         'name' => '企微',
         'code' => 'wecom_test_bot',
@@ -58,7 +58,10 @@ it('机器人回写：assistant 错误占位消息不会转发到机器人通道
     ]);
 
     (new BotBridgeService())->relayAssistantMessage($errorMessage);
-    expect(BootMessageLog::query()->count())->toBe(0);
+    expect(BootMessageLog::query()->count())->toBe(1)
+        ->and(BootMessageLog::query()->value('direction'))->toBe('outbound')
+        ->and(BootMessageLog::query()->value('content'))->toBe('Network error during POST chat/completions: ...')
+        ->and(BootMessageLog::query()->value('status'))->toBe('fail');
 
     $normalMessage = AiAgentMessage::query()->create([
         'agent_id' => (int)$agent->id,
@@ -69,9 +72,11 @@ it('机器人回写：assistant 错误占位消息不会转发到机器人通道
     ]);
 
     (new BotBridgeService())->relayAssistantMessage($normalMessage);
-    expect(BootMessageLog::query()->count())->toBe(1)
-        ->and(BootMessageLog::query()->value('direction'))->toBe('outbound')
-        ->and(BootMessageLog::query()->value('status'))->toBe('fail');
+    $logs = BootMessageLog::query()->orderBy('id')->get();
+    expect($logs)->toHaveCount(2)
+        ->and((string)$logs[1]->direction)->toBe('outbound')
+        ->and((string)$logs[1]->content)->toBe('普通回复')
+        ->and((string)$logs[1]->status)->toBe('fail');
 });
 
 it('机器人回写：视频结果使用 video 消息类型转发', function () {

@@ -29,9 +29,9 @@ final class FlowResumeService
         $currentNode = isset($orderedNodes[$currentIndex]) && is_array($orderedNodes[$currentIndex]) ? $orderedNodes[$currentIndex] : [];
 
         $taskId = trim((string)($suspendMeta['task_id'] ?? ''));
-        $pollMinutes = max(1, (int)($suspendMeta['poll_interval_minutes'] ?? 1));
+        $pollSeconds = max(1, (int)($suspendMeta['poll_interval_seconds'] ?? ((int)($suspendMeta['poll_interval_minutes'] ?? 1) * 60)));
         $timeoutMinutes = max(1, (int)($suspendMeta['timeout_minutes'] ?? 30));
-        $scheduledAt = Carbon::now()->addMinutes($pollMinutes);
+        $scheduledAt = Carbon::now()->addSeconds($pollSeconds);
 
         $job = AiSchedulerService::createJob([
             'callback_type' => 'flow',
@@ -59,7 +59,7 @@ final class FlowResumeService
                 'response_path' => (string)($suspendMeta['response_path'] ?? 'data.status'),
                 'completed_values' => is_array($suspendMeta['completed_values'] ?? null) ? ($suspendMeta['completed_values'] ?? []) : ['succeeded', 'completed', 'success'],
                 'failed_values' => is_array($suspendMeta['failed_values'] ?? null) ? ($suspendMeta['failed_values'] ?? []) : ['failed', 'error', 'canceled'],
-                'poll_interval_minutes' => $pollMinutes,
+                'poll_interval_seconds' => $pollSeconds,
                 'timeout_minutes' => $timeoutMinutes,
                 'suspended_at' => Carbon::now()->toDateTimeString(),
             ],

@@ -184,9 +184,6 @@ final class BotBridgeService
             return;
         }
         $payload = is_array($message->payload ?? null) ? ($message->payload ?? []) : [];
-        if ((bool)($payload['error'] ?? false)) {
-            return;
-        }
 
         /** @var AiAgentSession|null $session */
         $session = AiAgentSession::query()->find((int)$message->session_id);
@@ -374,32 +371,8 @@ final class BotBridgeService
 
     private function friendlyErrorReply(string $message): string
     {
-        $lower = strtolower(trim($message));
-        if ($lower === '') {
-            return '当前服务繁忙，请稍后再试。';
-        }
-
-        foreach ([
-            'requestbursttoofast',
-            'toomanyrequests',
-            'too many requests',
-            'rate limit',
-            'http 429',
-            'timed out',
-            'timeout',
-            'network error during post chat/completions',
-            'connection',
-            'service unavailable',
-            'overloaded',
-            'request id:',
-            '"error":{',
-        ] as $keyword) {
-            if (str_contains($lower, $keyword)) {
-                return '当前服务繁忙，请稍后再试。';
-            }
-        }
-
-        if (mb_strlen($message, 'UTF-8') > 160) {
+        $message = trim($message);
+        if ($message === '') {
             return '当前服务繁忙，请稍后再试。';
         }
 
@@ -422,6 +395,9 @@ final class BotBridgeService
         $text = trim((string)($message->content ?? ''));
         if ($text === '') {
             $text = trim((string)($payload['summary'] ?? $payload['tool_summary'] ?? $payload['message'] ?? ''));
+        }
+        if ($payload['error'] ?? false) {
+            $text = $this->friendlyErrorReply($text);
         }
 
         $imageUrl = $this->extractImageUrl($payload);

@@ -47,7 +47,8 @@ final class FlowResumePollJobHandler
 
         if (!in_array($statusValue, $completedValues, true)) {
             // 未完成，按节点设置固定轮询间隔继续调度
-            $next = Carbon::now()->addMinutes(max(1, (int)($payload['poll_interval_minutes'] ?? 1)));
+            $pollInterval = max(1, (int)($payload['poll_interval_seconds'] ?? ((int)($payload['poll_interval_minutes'] ?? 1) * 60)));
+            $next = Carbon::now()->addSeconds($pollInterval);
             $job->status = 'retrying';
             $job->execute_at = $next;
             $job->attempts = max(0, (int)$job->attempts);

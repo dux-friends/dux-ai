@@ -25,8 +25,8 @@ final class CapabilityVideoGenerateTaskListener
             'icon' => 'i-tabler:video-plus',
             'color' => 'primary',
             'defaults' => [
-                'delay_minutes' => 0,
-                'poll_interval_minutes' => 1,
+                'delay_seconds' => 0,
+                'poll_interval_seconds' => 30,
                 'timeout_minutes' => 30,
             ],
             'settings' => [
@@ -51,8 +51,8 @@ final class CapabilityVideoGenerateTaskListener
                 ['name' => 'frames', 'label' => '帧数(可选)', 'component' => 'number', 'componentProps' => ['min' => 1, 'step' => 1]],
                 ['name' => 'seed', 'label' => '种子(可选)', 'component' => 'number'],
                 ['name' => 'return_last_frame', 'label' => '返回尾帧图(可选)', 'component' => 'switch'],
-                ['name' => 'delay_minutes', 'label' => '首次查询延迟(分钟)', 'component' => 'number', 'defaultValue' => 0, 'componentProps' => ['min' => 0, 'step' => 1]],
-                ['name' => 'poll_interval_minutes', 'label' => '轮询间隔(分钟)', 'component' => 'number', 'defaultValue' => 1, 'componentProps' => ['min' => 1, 'step' => 1]],
+                ['name' => 'delay_seconds', 'label' => '首次查询延迟(秒)', 'component' => 'number', 'defaultValue' => 0, 'componentProps' => ['min' => 0, 'step' => 1]],
+                ['name' => 'poll_interval_seconds', 'label' => '轮询间隔(秒)', 'component' => 'number', 'defaultValue' => 30, 'componentProps' => ['min' => 1, 'step' => 1]],
                 ['name' => 'timeout_minutes', 'label' => '超时(分钟)', 'component' => 'number', 'defaultValue' => 30, 'componentProps' => ['min' => 1, 'step' => 1]],
             ],
         ]);
@@ -67,7 +67,7 @@ final class CapabilityVideoGenerateTaskListener
         ]);
         $event->schema($code, [
             'type' => 'object',
-            'description' => '输入字段：prompt（必填）；可选 image_url、resolution、ratio、duration、frames、seed、return_last_frame；可选 delay_minutes（首次查询延迟分钟）；可选轮询参数 poll_interval_minutes、timeout_minutes。模型由工具配置决定。',
+            'description' => '输入字段：prompt（必填）；可选 image_url、resolution、ratio、duration、frames、seed、return_last_frame；可选 delay_seconds（首次查询延迟秒）；可选轮询参数 poll_interval_seconds、timeout_minutes。模型由工具配置决定。',
             'properties' => [
                 'prompt' => ['type' => 'string', 'description' => '视频提示词'],
                 'image_url' => ['type' => 'string', 'description' => '首帧图片 URL（可选）'],
@@ -77,8 +77,8 @@ final class CapabilityVideoGenerateTaskListener
                 'frames' => ['type' => 'integer', 'description' => '帧数（可选）'],
                 'seed' => ['type' => 'integer', 'description' => '随机种子（可选）'],
                 'return_last_frame' => ['type' => 'boolean', 'description' => '是否返回尾帧图（可选）'],
-                'delay_minutes' => ['type' => 'integer', 'description' => '首次查询延迟分钟（可选，0=按轮询间隔开始）'],
-                'poll_interval_minutes' => ['type' => 'integer', 'description' => '轮询间隔分钟'],
+                'delay_seconds' => ['type' => 'integer', 'description' => '首次查询延迟秒（可选，0=按轮询间隔开始）'],
+                'poll_interval_seconds' => ['type' => 'integer', 'description' => '轮询间隔秒'],
                 'timeout_minutes' => ['type' => 'integer', 'description' => '任务超时分钟'],
             ],
             'required' => ['prompt'],

@@ -60,8 +60,8 @@ final class VideoGenerateCapability
             throw new ExceptionBusiness('请输入视频生成提示词（prompt）');
         }
 
-        $pollInterval = max(1, (int)($input['poll_interval_minutes'] ?? 1));
-        $firstPollDelay = max(0, (int)($input['delay_minutes'] ?? 0));
+        $pollInterval = max(1, (int)($input['poll_interval_seconds'] ?? ((int)($input['poll_interval_minutes'] ?? 1) * 60)));
+        $firstPollDelay = max(0, (int)($input['delay_seconds'] ?? ((int)($input['delay_minutes'] ?? 0) * 60)));
         $timeoutMinutes = max(1, (int)($input['timeout_minutes'] ?? 30));
 
         $payload = [];
@@ -181,7 +181,7 @@ final class VideoGenerateCapability
                     'response_path' => $statusPath !== '' ? $statusPath : 'data.status',
                     'completed_values' => $completedValues,
                     'failed_values' => $failedValues,
-                    'poll_interval_minutes' => $pollInterval,
+                    'poll_interval_seconds' => $pollInterval,
                     'timeout_minutes' => $timeoutMinutes,
                     'suspended_at' => $submittedAt->toDateTimeString(),
                 ],
@@ -229,7 +229,7 @@ final class VideoGenerateCapability
             throw new ExceptionBusiness('当前会话上下文无效，无法创建视频轮询任务');
         }
 
-        $executeAt = Carbon::now()->addMinutes($firstPollDelay > 0 ? $firstPollDelay : $pollInterval);
+        $executeAt = Carbon::now()->addSeconds($firstPollDelay > 0 ? $firstPollDelay : $pollInterval);
         $dedupeKey = sprintf(
             'video:poll:%d:%s:%s',
             $sessionId,
@@ -248,8 +248,8 @@ final class VideoGenerateCapability
             'callback_params' => [
                 'model_id' => (int)$model->id,
                 'task_id' => $taskId,
-                'poll_interval_minutes' => $pollInterval,
-                'delay_minutes' => $firstPollDelay,
+                'poll_interval_seconds' => $pollInterval,
+                'delay_seconds' => $firstPollDelay,
                 'timeout_minutes' => $timeoutMinutes,
                 'submitted_at' => $submittedAt->toDateTimeString(),
                 'agent_id' => $agentId,
@@ -273,9 +273,7 @@ final class VideoGenerateCapability
                 'submitted_at' => $submittedAt->toDateTimeString(),
                 'next_execute_at' => $executeAt->toDateTimeString(),
             ],
-            'summary' => $firstPollDelay > 0
-                ? sprintf('视频任务已提交（%s），将于 %d 分钟后开始查询结果', $taskId, $firstPollDelay)
-                : sprintf('视频任务已提交（%s）', $taskId),
+            'summary' => '视频任务已提交，稍后查询生成结果',
         ];
     }
 }
