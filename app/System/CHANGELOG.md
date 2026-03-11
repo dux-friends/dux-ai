@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+## [0.2.2] - 2026-03-11
+
+- 更新队列统计适配新运
+
 ## [0.2.1] - 2026-03-07
 
 - fix: 修正编辑计划任务问题
