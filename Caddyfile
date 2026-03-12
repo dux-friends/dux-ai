@@ -1,0 +1,13 @@
+{
+    auto_https off
+    frankenphp
+}
+
+:8080 {
+    root * public
+
+    php_server {
+        root public
+        worker index.php 4
+    }
+}
