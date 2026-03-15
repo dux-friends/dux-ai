@@ -43,7 +43,7 @@ class Session extends Resources
             $query->where('user_id', (int)$params['user_id']);
         }
 
-        $query->with('agent');
+        $query->with(['agent']);
         $query->orderByDesc('last_message_at')->orderByDesc('id');
     }
 

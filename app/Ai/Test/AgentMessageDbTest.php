@@ -52,3 +52,15 @@ it('消息：IncomingMessageHandler 会提取最后一条 user 并入库', funct
         ->and($stored?->payload)->toHaveKey('parts');
 });
 
+it('消息：markUserMessageApprovalRequired 会写入审批状态和审批元数据', function () {
+    $agent = AiAgent::query()->create(['name' => 'A', 'code' => 'a', 'active' => true]);
+    $sessionId = SessionManager::ensureSessionId($agent);
+
+    $msg = MessageStore::appendMessage($agent->id, $sessionId, 'user', '危险动作测试', []);
+    MessageStore::markUserMessageApprovalRequired((int)$msg->id, 12, '需要人工审批');
+
+    $stored = \App\Ai\Models\AiAgentMessage::query()->find((int)$msg->id);
+    expect($stored?->payload['_request']['status'] ?? null)->toBe('approval_required')
+        ->and($stored?->payload['_approval']['id'] ?? null)->toBe(12)
+        ->and($stored?->payload['_approval']['status'] ?? null)->toBe('pending');
+});

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Traits;
 
 use App\Ai\Models\AiAgent;
-use App\Ai\Service\Agent as AgentService;
+use App\Ai\Service\Agent\Service as AgentService;
 use App\Ai\Service\Agent\AttachmentConfig;
 use App\Ai\Service\Agent\CardParser;
 use App\Ai\Service\Agent\FileUploader;
@@ -13,6 +13,7 @@ use App\Ai\Service\Agent\HttpRequest;
 use App\Ai\Service\Agent\OpenAiMessage;
 use App\Ai\Service\Agent\OpenAiHttp;
 use App\Ai\Service\Agent\SessionGuard;
+use App\Ai\Models\AiAgentSession;
 use App\Ai\Event\ActionEvent;
 use App\Ai\Support\AiRuntime;
 use Core\App;
@@ -63,6 +64,10 @@ trait AgentOpenAITrait
         } catch (ExceptionBusiness $e) {
             return OpenAiHttp::errorJson($response, $e->getMessage(), 'invalid_request_error', 400);
         } catch (\Throwable $e) {
+            AiRuntime::instance()->log('ai.agent')->error('approval.approve.failed', [
+                'id' => (int)($args['id'] ?? 0),
+                'message' => $e->getMessage(),
+            ]);
             return OpenAiHttp::errorJson($response, '服务器内部错误', 'internal_error', 500);
         }
     }
@@ -70,7 +75,7 @@ trait AgentOpenAITrait
     #[Route(methods: 'POST', route: '/chat/completions')]
     public function chatCompletions(ServerRequestInterface $request, ResponseInterface $response, array $args): ResponseInterface
     {
-            $stream = false;
+        $stream = false;
         try {
             $this->prepareAgentContext($request, $response);
             $body = HttpRequest::jsonBody($request);
@@ -78,18 +83,16 @@ trait AgentOpenAITrait
             $agents = $this->ensureAvailableAgents();
             $agent = $this->resolveAgentFromModels($agents, isset($body['model']) ? (string)$body['model'] : null);
 
-            $messages = OpenAiMessage::normalize($body['messages'] ?? []);
-            if ($messages === []) {
-                throw new ExceptionBusiness('messages 不能为空');
-            }
-
             $sessionId = null;
             if (isset($body['session_id']) && is_numeric($body['session_id'])) {
                 $sessionId = (int)$body['session_id'];
             }
 
             [$userType, $userId] = $this->resolveUserContext();
-
+            $messages = OpenAiMessage::normalize($body['messages'] ?? []);
+            if ($messages === []) {
+                throw new ExceptionBusiness('messages 不能为空');
+            }
             $generator = AgentService::streamChat($agent->code, $messages, $sessionId, $userType, $userId);
             $generator->rewind();
 
@@ -123,7 +126,7 @@ trait AgentOpenAITrait
                 AiRuntime::instance()->log('ai.agent')->error('Agent stream error', [
                     'message' => $e->getMessage(),
                 ]);
-                return OpenAiHttp::sseErrorResponse($response, 500, '服务器内部错误');
+                return OpenAiHttp::sseErrorResponse($response, 500, $e->getMessage());
             }
             return OpenAiHttp::errorJson($response, '服务器内部错误', 'internal_error', 500);
         }
@@ -237,6 +240,10 @@ trait AgentOpenAITrait
         } catch (ExceptionBusiness $e) {
             return OpenAiHttp::errorJson($response, $e->getMessage(), 'invalid_request_error', 400);
         } catch (\Throwable $e) {
+            AiRuntime::instance()->log('ai.agent')->error('approval.reject.failed', [
+                'id' => (int)($args['id'] ?? 0),
+                'message' => $e->getMessage(),
+            ]);
             return OpenAiHttp::errorJson($response, '服务器内部错误', 'internal_error', 500);
         }
     }
@@ -313,7 +320,9 @@ trait AgentOpenAITrait
             $params = $request->getQueryParams();
             $limit = isset($params['limit']) ? (int)$params['limit'] : 50;
             $limit = max(1, min(200, $limit));
-            $messages = AgentService::listMessages($session->id, $limit);
+            $afterId = isset($params['after_id']) ? (int)$params['after_id'] : 0;
+            $afterId = max(0, $afterId);
+            $messages = AgentService::listMessages($session->id, $limit, $afterId);
             return OpenAiHttp::json($response, [
                 'object' => 'list',
                 'data' => $messages,
@@ -369,102 +378,6 @@ trait AgentOpenAITrait
         }
     }
 
-    private function collectCompletion(\Generator $generator, AiAgent $agent): array
-    {
-        $content = '';
-        $sessionId = null;
-        $model = $agent->model?->model ?? $agent->code;
-        $completionId = null;
-        $finishReason = 'stop';
-        $assistantParts = [];
-
-        foreach ($generator as $chunk) {
-            $payload = OpenAiHttp::decodeSseChunk($chunk);
-            if ($payload === null) {
-                continue;
-            }
-            if (isset($payload['error'])) {
-                $message = is_array($payload['error']) ? ($payload['error']['message'] ?? '推理失败') : '推理失败';
-                throw new ExceptionBusiness($message);
-            }
-            if (isset($payload['session_id'])) {
-                $sessionId = (int)$payload['session_id'];
-            }
-            if (isset($payload['model'])) {
-                $model = (string)$payload['model'];
-            }
-            if (isset($payload['id'])) {
-                $completionId = (string)$payload['id'];
-            }
-            $delta = $payload['choices'][0]['delta'] ?? [];
-            if (isset($delta['content'])) {
-                $deltaContent = $delta['content'];
-                if (is_string($deltaContent)) {
-                    $content .= $deltaContent;
-                } elseif (is_array($deltaContent)) {
-                    foreach ($deltaContent as $part) {
-                        if (!is_array($part)) {
-                            continue;
-                        }
-                        $assistantParts[] = $part;
-                    }
-                }
-            }
-            if (!empty($payload['choices'][0]['finish_reason'])) {
-                $finishReason = (string)$payload['choices'][0]['finish_reason'];
-            }
-        }
-
-        $messageContent = $content;
-        if ($assistantParts !== []) {
-            $parts = [];
-            if (trim($content) !== '') {
-                $parts[] = [
-                    'type' => 'text',
-                    'text' => trim($content),
-                ];
-            }
-            foreach ($assistantParts as $part) {
-                if (is_array($part)) {
-                    $parts[] = $part;
-                }
-            }
-            if ($parts !== []) {
-                $messageContent = $parts;
-            }
-        } else {
-            $structured = CardParser::extractStructuredResult($content);
-            if (is_array($structured)) {
-                $parts = is_array($structured['parts'] ?? null) ? ($structured['parts'] ?? []) : [];
-                if ($parts !== []) {
-                    $messageContent = $parts;
-                }
-            }
-        }
-
-        return [
-            'id' => $completionId ?? ('chatcmpl_' . uniqid()),
-            'object' => 'chat.completion',
-            'created' => time(),
-            'model' => $model,
-            'choices' => [
-                [
-                    'index' => 0,
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => $messageContent,
-                    ],
-                    'finish_reason' => $finishReason,
-                ],
-            ],
-            'usage' => null,
-            'session_id' => $sessionId,
-        ];
-    }
-
-    /**
-     * 宿主可重写该方法，用于解析授权、设置用户上下文、可用模型等。
-     */
     protected function prepareAgentContext(ServerRequestInterface $request, ResponseInterface $response): void
     {
         $this->agentUserType = null;

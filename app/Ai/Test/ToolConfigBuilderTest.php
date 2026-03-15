@@ -96,3 +96,35 @@ it('工具配置：保留结构化输出配置供工具运行时使用', functio
 
     Tool::reset();
 });
+
+it('工具配置：透传风险等级与动作清单元数据', function () {
+    Tool::reset();
+    setToolRegistry([
+        'tool_action' => [
+            'code' => 'tool_action',
+            'label' => '工具动作',
+            'risk_level' => 'safe',
+            'actions' => [
+                ['action' => 'browser.read', 'label' => '读取网页', 'risk_level' => 'safe'],
+                ['action' => 'terminal.exec', 'label' => '执行终端命令', 'risk_level' => 'dangerous'],
+            ],
+            'tool' => ['function' => 'tool_action'],
+            'schema' => ['type' => 'object', 'properties' => ['action' => ['type' => 'string']]],
+        ],
+    ]);
+
+    $agent = newAiAgentWithoutCtor();
+    $agent->tools = [
+        ['code' => 'tool_action', 'description' => '工具动作'],
+    ];
+
+    $built = ToolConfigBuilder::build($agent);
+
+    expect($built['map'])->toHaveKey('tool_action')
+        ->and($built['map']['tool_action']['risk_level'])->toBe('safe')
+        ->and($built['map']['tool_action']['actions'])->toBeArray()
+        ->and($built['map']['tool_action']['actions'][1]['action'] ?? null)->toBe('terminal.exec')
+        ->and($built['map']['tool_action']['actions'][1]['risk_level'] ?? null)->toBe('dangerous');
+
+    Tool::reset();
+});

@@ -6,8 +6,10 @@ namespace App\Ai\Service\Scheduler;
 
 use App\Ai\Models\AiScheduler;
 use Carbon\Carbon;
+use App\Ai\Queue\AiSchedulerJob;
 use Core\App;
 use Core\Handlers\ExceptionBusiness;
+use Cron\CronExpression;
 
 final class AiSchedulerService
 {
@@ -110,15 +112,10 @@ final class AiSchedulerService
             ]);
 
             try {
-                App::log('ai_scheduler')->info('ai.scheduler.execute_start', [
+                App::queue()->add(AiSchedulerJob::class, '', [(int)$job->id])->send();
+                App::log('ai_scheduler')->info('ai.scheduler.enqueued', [
                     'id' => (int)$job->id,
                     'time' => $now->toDateTimeString(),
-                ]);
-                $result = (new AiSchedulerExecutor())->executeById((int)$job->id);
-                App::log('ai_scheduler')->info('ai.scheduler.execute_done', [
-                    'id' => (int)$job->id,
-                    'result' => $result,
-                    'time' => date('Y-m-d H:i:s'),
                 ]);
             } catch (\Throwable $exception) {
                 AiScheduler::query()
@@ -131,7 +128,7 @@ final class AiSchedulerService
                         'locked_by' => null,
                         'updated_at' => $now,
                     ]);
-                App::log('ai_scheduler')->error('ai.scheduler.execute_failed', [
+                App::log('ai_scheduler')->error('ai.scheduler.enqueue_failed', [
                     'id' => (int)$job->id,
                     'error' => $exception->getMessage(),
                     'time' => $now->toDateTimeString(),
@@ -189,11 +186,20 @@ final class AiSchedulerService
      */
     public static function markSuccess(AiScheduler $job, array $result = []): void
     {
-        $job->status = 'success';
         $job->result = $result;
         $job->last_error = null;
         $job->locked_at = null;
         $job->locked_by = null;
+        $nextExecuteAt = self::nextRecurringExecuteAt($job);
+        if ($nextExecuteAt) {
+            $job->status = 'pending';
+            $job->attempts = 0;
+            $job->execute_at = $nextExecuteAt;
+            $job->save();
+            return;
+        }
+
+        $job->status = 'success';
         $job->save();
     }
 
@@ -234,5 +240,27 @@ final class AiSchedulerService
     {
         $host = gethostname() ?: 'host';
         return sprintf('%s:%d', $host, getmypid());
+    }
+
+    private static function nextRecurringExecuteAt(AiScheduler $job): ?Carbon
+    {
+        $params = is_array($job->callback_params ?? null) ? ($job->callback_params ?? []) : [];
+        $schedule = is_array($params['__schedule'] ?? null) ? ($params['__schedule'] ?? []) : [];
+        if (!($schedule['recurring'] ?? false)) {
+            return null;
+        }
+
+        $base = $job->execute_at?->copy() ?: Carbon::now();
+        $cron = trim((string)($schedule['cron'] ?? ''));
+        if ($cron !== '') {
+            return Carbon::instance(CronExpression::factory($cron)->getNextRunDate($base, 0, false));
+        }
+
+        $intervalMinutes = max(0, (int)($schedule['interval_minutes'] ?? 0));
+        if ($intervalMinutes <= 0) {
+            return null;
+        }
+
+        return $base->copy()->addMinutes($intervalMinutes);
     }
 }

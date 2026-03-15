@@ -8,6 +8,12 @@ use App\Ai\Models\AiAgentMessage;
 
 final class MessageQuery
 {
+    private static function requestState(array $payload): string
+    {
+        $request = is_array($payload['_request'] ?? null) ? ($payload['_request'] ?? []) : [];
+        return trim((string)($request['status'] ?? ''));
+    }
+
     private static function isErrorMessagePayload(array $payload): bool
     {
         if (!array_key_exists('error', $payload)) {
@@ -47,6 +53,11 @@ final class MessageQuery
 
         // 解析/调用失败的错误占位消息：不返回给前端（避免污染上下文/误显示为正常回复）。
         if ($role === 'assistant' && self::isErrorMessagePayload($payload)) {
+            return true;
+        }
+
+        // 失败轮次的 user message 不参与后续模型历史，避免下一次新消息把旧失败问题再次带入。
+        if (!$forUi && $role === 'user' && self::requestState($payload) === 'error') {
             return true;
         }
 
@@ -99,11 +110,14 @@ final class MessageQuery
      *
      * @return array<int, array<string, mixed>>
      */
-    public static function listMessagesForUI(int $sessionId, int $limit = 0): array
+    public static function listMessagesForUI(int $sessionId, int $limit = 0, int $afterId = 0): array
     {
         $query = AiAgentMessage::query()
             ->where('session_id', $sessionId)
             ->orderBy('id', 'asc');
+        if ($afterId > 0) {
+            $query->where('id', '>', $afterId);
+        }
         if ($limit) {
             $query->limit($limit);
         }
@@ -115,6 +129,19 @@ final class MessageQuery
             })
             ->values()
             ->all();
+    }
+
+    public static function latestRetryableUserMessage(int $sessionId): ?AiAgentMessage
+    {
+        return AiAgentMessage::query()
+            ->where('session_id', $sessionId)
+            ->where('role', 'user')
+            ->orderByDesc('id')
+            ->get()
+            ->first(function (AiAgentMessage $message) {
+                $payload = is_array($message->payload ?? null) ? ($message->payload ?? []) : [];
+                return self::requestState($payload) === 'error';
+            });
     }
 
     /**
@@ -171,6 +198,22 @@ final class MessageQuery
 
         if ($meta !== []) {
             $out['meta'] = $meta;
+        }
+
+        $request = is_array($payload['_request'] ?? null) ? ($payload['_request'] ?? []) : [];
+        if ($request !== []) {
+            $out['meta'] = [
+                ...($out['meta'] ?? []),
+                'request' => $request,
+            ];
+        }
+
+        $approval = is_array($payload['_approval'] ?? null) ? ($payload['_approval'] ?? []) : [];
+        if ($approval !== []) {
+            $out['meta'] = [
+                ...($out['meta'] ?? []),
+                'approval' => $approval,
+            ];
         }
 
         return $out;

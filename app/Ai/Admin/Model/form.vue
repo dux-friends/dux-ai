@@ -21,6 +21,11 @@ const model = ref({
   options: {
     batch_size: null,
     debug_log: false,
+    max_output_tokens: 600,
+    rate_limit: {
+      tpm: null,
+      max_wait_ms: 8000,
+    },
     video_compress: {
       enabled: true,
       max_mb: 10,
@@ -172,6 +177,13 @@ function defaultVideoCompress() {
   }
 }
 
+function defaultRateLimit() {
+  return {
+    tpm: null,
+    max_wait_ms: 8000,
+  }
+}
+
 function normalizeVideoCompress(value) {
   const defaults = defaultVideoCompress()
   const source = value && typeof value === 'object' ? value : {}
@@ -185,6 +197,17 @@ function normalizeVideoCompress(value) {
     audio_kbps: Math.min(192, Math.max(16, Number(source.audio_kbps ?? defaults.audio_kbps) || defaults.audio_kbps)),
     timeout: Math.min(600, Math.max(10, Number(source.timeout ?? defaults.timeout) || defaults.timeout)),
     preset,
+  }
+}
+
+function normalizeRateLimit(value) {
+  const defaults = defaultRateLimit()
+  const source = value && typeof value === 'object' ? value : {}
+  const tpm = normalizeNumber(source.tpm, null)
+  const maxWaitMs = normalizeNumber(source.max_wait_ms, defaults.max_wait_ms)
+  return {
+    tpm: tpm && tpm > 0 ? Math.min(10000000, Math.max(1000, tpm)) : null,
+    max_wait_ms: Math.min(60000, Math.max(0, maxWaitMs || defaults.max_wait_ms)),
   }
 }
 
@@ -293,6 +316,8 @@ watch(
     if (!value || typeof value !== 'object') {
       model.value.options = {
         batch_size: null,
+        max_output_tokens: 600,
+        rate_limit: defaultRateLimit(),
         video_compress: defaultVideoCompress(),
         video_capabilities: defaultVideoCapabilities(),
         attachments: defaultAttachments(),
@@ -301,23 +326,29 @@ watch(
     }
     const batchSize = normalizeNumber(value.batch_size, null)
     const debugLog = Boolean(value.debug_log)
+    const maxOutputTokens = Math.min(8192, Math.max(128, normalizeNumber(value.max_output_tokens, 600) || 600))
     const mediaStorageName = value.media_storage_name && String(value.media_storage_name).trim() !== ''
       ? String(value.media_storage_name)
       : undefined
     const attachments = normalizeAttachments(value.attachments)
+    const rateLimit = normalizeRateLimit(value.rate_limit)
     const videoCapabilities = normalizeVideoCapabilities(value.video_capabilities)
     const videoCompress = normalizeVideoCompress(value.video_compress)
     if (value.batch_size !== batchSize
       || value.debug_log !== debugLog
+      || value.max_output_tokens !== maxOutputTokens
       || value.media_storage_name !== mediaStorageName
       || JSON.stringify(value.attachments || {}) !== JSON.stringify(attachments)
+      || JSON.stringify(value.rate_limit || {}) !== JSON.stringify(rateLimit)
       || JSON.stringify(value.video_capabilities || {}) !== JSON.stringify(videoCapabilities)
       || JSON.stringify(value.video_compress || {}) !== JSON.stringify(videoCompress)) {
       model.value.options = {
         ...value,
         batch_size: batchSize,
         debug_log: debugLog,
+        max_output_tokens: maxOutputTokens,
         media_storage_name: mediaStorageName,
+        rate_limit: rateLimit,
         video_capabilities: videoCapabilities,
         video_compress: videoCompress,
         attachments,
@@ -354,6 +385,8 @@ watch(
     if (!model.value.options || typeof model.value.options !== 'object') {
       model.value.options = {
         batch_size: null,
+        max_output_tokens: 600,
+        rate_limit: defaultRateLimit(),
         video_compress: defaultVideoCompress(),
         video_capabilities: defaultVideoCapabilities(),
         attachments: defaultAttachments(),
@@ -362,6 +395,7 @@ watch(
     }
     model.value.options = {
       ...model.value.options,
+      rate_limit: normalizeRateLimit(model.value.options.rate_limit),
       attachments: normalizeAttachments(model.value.options.attachments),
     }
     if (value !== 'embedding') {
@@ -370,10 +404,16 @@ watch(
         ...model.value.options,
         batch_size: null,
       }
-      return
     }
-    if (!Object.prototype.hasOwnProperty.call(model.value.options, 'batch_size')) {
+    else if (!Object.prototype.hasOwnProperty.call(model.value.options, 'batch_size')) {
       model.value.options = { ...model.value.options, batch_size: null }
+    }
+    if (value !== 'chat') {
+      model.value.options = {
+        ...model.value.options,
+        max_output_tokens: 600,
+        rate_limit: defaultRateLimit(),
+      }
     }
   },
   { immediate: true },
@@ -469,6 +509,15 @@ watch(
           </DuxFormItem>
           <DuxFormItem v-if="videoPolicy === 'model'" label="视频发送模式">
             <NSelect v-model:value="model.options.attachments.mode.video" :options="documentModeOptions" />
+          </DuxFormItem>
+          <DuxFormItem label="默认输出 Token" description="预算器预留的单次输出长度，建议按模型常规回复长度设置">
+            <NInputNumber v-model:value="model.options.max_output_tokens" :min="128" :max="8192" placeholder="默认 600" class="w-full" />
+          </DuxFormItem>
+          <DuxFormItem label="TPM 限速" description="每分钟 Token 预算，留空或 0 表示关闭">
+            <NInputNumber v-model:value="model.options.rate_limit.tpm" :min="0" :max="10000000" placeholder="例如 30000" class="w-full" />
+          </DuxFormItem>
+          <DuxFormItem label="最大排队等待(ms)" description="预算不足时最多等待多久，超时后仍会放行并打日志">
+            <NInputNumber v-model:value="model.options.rate_limit.max_wait_ms" :min="0" :max="60000" placeholder="默认 8000" class="w-full" />
           </DuxFormItem>
         </template>
         <template v-else-if="isImageOrVideo">

@@ -96,6 +96,7 @@ class Model extends Resources
         $options['media_storage_name'] = $mediaStorageName !== '' ? $mediaStorageName : null;
         $options['video_compress'] = $this->normalizeVideoCompress($options['video_compress'] ?? []);
         $options['attachments'] = AttachmentConfig::normalize($options['attachments'] ?? []);
+        $options['rate_limit'] = $this->normalizeRateLimit($options['rate_limit'] ?? []);
         $batchSize = isset($options['batch_size']) && is_numeric($options['batch_size'])
             ? (int)$options['batch_size']
             : null;
@@ -109,6 +110,15 @@ class Model extends Resources
         }
         if ($type !== AiModelEntity::TYPE_VIDEO) {
             unset($options['video_compress']);
+        }
+        if ($type !== AiModelEntity::TYPE_CHAT) {
+            unset($options['rate_limit']);
+            unset($options['max_output_tokens']);
+        } else {
+            $maxOutputTokens = isset($options['max_output_tokens']) && is_numeric($options['max_output_tokens'])
+                ? (int)$options['max_output_tokens']
+                : 600;
+            $options['max_output_tokens'] = max(128, min(8192, $maxOutputTokens));
         }
 
         $id = (int)($args['id'] ?? 0);
@@ -169,6 +179,22 @@ class Model extends Resources
             'audio_kbps' => max(16, min(192, $audioKbps)),
             'timeout' => max(10, min(600, $timeout)),
             'preset' => $preset,
+        ];
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, int|null>
+     */
+    private function normalizeRateLimit(mixed $value): array
+    {
+        $source = is_array($value) ? $value : [];
+        $tpm = isset($source['tpm']) && is_numeric($source['tpm']) ? (int)$source['tpm'] : 0;
+        $maxWaitMs = isset($source['max_wait_ms']) && is_numeric($source['max_wait_ms']) ? (int)$source['max_wait_ms'] : 8000;
+
+        return [
+            'tpm' => $tpm > 0 ? max(1000, min(10000000, $tpm)) : null,
+            'max_wait_ms' => max(0, min(60000, $maxWaitMs)),
         ];
     }
 

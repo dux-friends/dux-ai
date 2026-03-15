@@ -13,6 +13,32 @@ use Core\App;
 
 final class MessageStore
 {
+    private static function normalizePayload(array $payload = []): array
+    {
+        return $payload ?: [];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private static function withRequestState(array $payload, string $status, ?string $error = null, ?bool $retryable = null): array
+    {
+        $payload = self::normalizePayload($payload);
+        $request = is_array($payload['_request'] ?? null) ? ($payload['_request'] ?? []) : [];
+        $request['status'] = $status;
+        if ($error !== null) {
+            $request['error'] = $error;
+        } else {
+            unset($request['error']);
+        }
+        if ($retryable !== null) {
+            $request['retryable'] = $retryable;
+        }
+        $payload['_request'] = $request;
+        return $payload;
+    }
+
     private static function normalizeContentForStorage(mixed $content): string
     {
         if ($content === null) {
@@ -70,6 +96,9 @@ final class MessageStore
     public static function appendMessage(int $agentId, int $sessionId, string $role, mixed $content = null, array $payload = [], ?string $tool = null, ?string $toolCallId = null): AiAgentMessage
     {
         $content = self::normalizeContentForStorage($content);
+        if ($role === 'user') {
+            $payload = self::withRequestState($payload, 'pending');
+        }
         $message = AiAgentMessage::query()->create([
             'agent_id' => $agentId,
             'session_id' => $sessionId,
@@ -83,6 +112,51 @@ final class MessageStore
         self::fillSessionTitleIfEmpty($sessionId, $role, $content);
         self::dispatchPersistedEventIfNeeded($message);
         return $message;
+    }
+
+    public static function markUserMessageRunning(int $messageId): void
+    {
+        self::updateUserMessageState($messageId, 'running');
+    }
+
+    public static function markUserMessageApprovalRequired(int $messageId, int $approvalId, string $summary = ''): void
+    {
+        $message = AiAgentMessage::query()->find($messageId);
+        if (!$message || $message->role !== 'user') {
+            return;
+        }
+
+        $payload = is_array($message->payload ?? null) ? ($message->payload ?? []) : [];
+        $payload = self::withRequestState($payload, 'approval_required');
+        $payload['_approval'] = [
+            'id' => $approvalId,
+            'status' => 'pending',
+            'summary' => $summary,
+        ];
+        $message->payload = $payload;
+        $message->save();
+    }
+
+    public static function markUserMessageCompleted(int $messageId): void
+    {
+        self::updateUserMessageState($messageId, 'completed');
+    }
+
+    public static function markUserMessageFailed(int $messageId, string $error, bool $retryable = true): void
+    {
+        self::updateUserMessageState($messageId, 'error', $error, $retryable);
+    }
+
+    private static function updateUserMessageState(int $messageId, string $status, ?string $error = null, ?bool $retryable = null): void
+    {
+        $message = AiAgentMessage::query()->find($messageId);
+        if (!$message || $message->role !== 'user') {
+            return;
+        }
+
+        $payload = is_array($message->payload ?? null) ? ($message->payload ?? []) : [];
+        $message->payload = self::withRequestState($payload, $status, $error, $retryable);
+        $message->save();
     }
 
     /**

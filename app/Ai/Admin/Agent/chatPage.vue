@@ -18,6 +18,12 @@ interface ChatMessage {
   meta?: Record<string, any>
 }
 
+interface StreamStatus {
+  code: string
+  label: string
+  meta?: Record<string, any>
+}
+
 const props = defineProps<{
   code?: string
   sessionId?: number | null
@@ -81,6 +87,35 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const pendingImages = ref<{ url: string, filename?: string, content?: string, mode_hint?: string, parse_mode?: string, parsed_text?: string, bytes?: number, mime_type?: string }[]>([])
 const pendingFiles = ref<{ url: string, filename?: string, content?: string, mode_hint?: string, media_kind?: string, mime_type?: string, parse_mode?: string, parsed_text?: string, bytes?: number }[]>([])
 const showMobileSidebar = ref(false)
+const streamStatus = ref<StreamStatus | null>(null)
+const sessionNotice = ref('')
+const SESSION_BUSY_MESSAGE = '当前会话正在处理中，请等待本轮完成后再发送'
+
+const streamStatusTone = computed(() => {
+  const code = streamStatus.value?.code || ''
+  if (code === 'queued' || code === 'retry_wait')
+    return 'warning'
+  if (code === 'tool_call' || code === 'tool_result')
+    return 'info'
+  return 'primary'
+})
+
+const streamStatusText = computed(() => {
+  const status = streamStatus.value
+  if (!status)
+    return ''
+  const meta = status.meta || {}
+  if (status.code === 'queued' && meta.waited_ms) {
+    return `${status.label} · 已等待 ${Math.ceil(Number(meta.waited_ms) / 1000)}s`
+  }
+  if (status.code === 'retry_wait' && meta.delay_ms) {
+    return `${status.label} · ${Math.ceil(Number(meta.delay_ms) / 1000)}s 后继续`
+  }
+  if ((status.code === 'tool_call' || status.code === 'tool_result') && meta.tool) {
+    return `${status.label} · ${String(meta.tool)}`
+  }
+  return status.label
+})
 
 function headers() {
   const h: Record<string, string> = {
@@ -142,6 +177,7 @@ function formatMessageTime(msg: ChatMessage): string {
 
 function appendAssistantDeltaParts(msg: ChatMessage, parts: any[]) {
   msg.meta = msg.meta || {}
+  const meta = msg.meta
   parts.forEach((part: any) => {
     if (!part || typeof part !== 'object')
       return
@@ -156,8 +192,8 @@ function appendAssistantDeltaParts(msg: ChatMessage, parts: any[]) {
       const image = part.image_url
       const url = normalizeMediaUrl(image)
       if (url) {
-        msg.meta.images = msg.meta.images || []
-        msg.meta.images.push(typeof image === 'string' ? { url } : image)
+        meta.images = meta.images || []
+        meta.images.push(typeof image === 'string' ? { url } : image)
       }
       return
     }
@@ -165,19 +201,19 @@ function appendAssistantDeltaParts(msg: ChatMessage, parts: any[]) {
       const video = part.video_url
       const url = normalizeMediaUrl(video)
       if (url) {
-        msg.meta.videos = msg.meta.videos || []
-        msg.meta.videos.push(typeof video === 'string' ? { url } : video)
+        meta.videos = meta.videos || []
+        meta.videos.push(typeof video === 'string' ? { url } : video)
       }
       return
     }
     if (type === 'file_url') {
       const file = part.file || part
-      msg.meta.files = msg.meta.files || []
-      msg.meta.files.push(file)
+      meta.files = meta.files || []
+      meta.files.push(file)
       return
     }
     if (type === 'card' && Array.isArray(part.card)) {
-      msg.meta.card = part.card
+      meta.card = part.card
     }
   })
 }
@@ -201,10 +237,30 @@ async function handleCardAction(button: any) {
     return
   }
 
+  if (type === 'approval') {
+    const text = String(button?.text || '').trim()
+    if (!text) {
+      message.error('审批内容为空')
+      return
+    }
+
+    try {
+      inputText.value = text
+      await sendMessage()
+      await loadMessages(activeSessionId.value)
+      scrollToBottom()
+    }
+    catch (err: any) {
+      message.error(err?.message || '审批操作失败')
+    }
+    return
+  }
+
   if (!activeSessionId.value)
     return
 
   const action = String(button?.action || '')
+
   if (!action)
     return
 
@@ -262,6 +318,44 @@ function scrollToBottom() {
 function appendMessage(msg: ChatMessage) {
   chatHistory.value.push(msg)
   scrollToBottom()
+}
+
+function createLocalMessageId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function hasVisibleMessageContent(msg?: ChatMessage | null) {
+  if (!msg)
+    return false
+  const text = String(msg.content || '').trim()
+  if (text)
+    return true
+  if (Array.isArray(msg.meta?.images) && msg.meta.images.length)
+    return true
+  if (Array.isArray(msg.meta?.videos) && msg.meta.videos.length)
+    return true
+  if (Array.isArray(msg.meta?.files) && msg.meta.files.length)
+    return true
+  if (Array.isArray(msg.meta?.card) && msg.meta.card.length)
+    return true
+  return false
+}
+
+function isPendingAssistant(msg?: ChatMessage | null) {
+  if (!msg || msg.role !== 'assistant')
+    return false
+  return Boolean(msg.meta?.pending) && !hasVisibleMessageContent(msg)
+}
+
+function cleanupPendingAssistant(index: number | null) {
+  if (index === null)
+    return
+  const target = chatHistory.value[index]
+  if (!target || target.role !== 'assistant')
+    return
+  if (hasVisibleMessageContent(target))
+    return
+  chatHistory.value.splice(index, 1)
 }
 
 function buildPayloadMessages(baseMessages: ChatMessage[]) {
@@ -590,6 +684,12 @@ function handleAbort() {
   controller.value?.abort()
   controller.value = null
   sending.value = false
+  streamStatus.value = null
+}
+
+function isSessionBusyError(input: unknown) {
+  const text = String((input as any)?.message || input || '').trim()
+  return text.includes(SESSION_BUSY_MESSAGE)
 }
 
 function applyAttachmentSupport() {
@@ -632,6 +732,7 @@ async function handleSend() {
     role: 'user',
     content: content || (hasImages ? '发送图片' : '发送文件'),
     meta: {
+      id: createLocalMessageId('user'),
       created_at: dayjs().format('YYYY-MM-DD HH:mm:ss'),
       images: pendingImages.value.map(f => ({
         url: f.url,
@@ -656,12 +757,28 @@ async function handleSend() {
       })),
     },
   }
+  const assistantPlaceholder: ChatMessage = {
+    role: 'assistant',
+    content: '',
+    meta: {
+      id: createLocalMessageId('assistant'),
+      created_at: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      pending: true,
+    },
+  }
 
   chatHistory.value.push(userMsg)
+  chatHistory.value.push(assistantPlaceholder)
+  scrollToBottom()
   pendingImages.value = []
   pendingFiles.value = []
   inputText.value = ''
   sending.value = true
+  sessionNotice.value = ''
+  streamStatus.value = {
+    code: 'thinking',
+    label: '正在发送请求',
+  }
 
   const streamUrl = manage.getApiUrl(`${apiBase}/chat/completions`)
   const signalController = new AbortController()
@@ -674,7 +791,7 @@ async function handleSend() {
     stream: true,
   }
 
-  let currentAssistantIndex: number | null = null
+  let currentAssistantIndex: number | null = chatHistory.value.length - 1
   let currentAssistantMessageId: string | null = null
 
   fetchEventSource(streamUrl, {
@@ -685,8 +802,10 @@ async function handleSend() {
     credentials: 'include',
     onmessage(ev) {
       if (ev.data === '[DONE]') {
+        cleanupPendingAssistant(currentAssistantIndex)
         sending.value = false
         controller.value = null
+        streamStatus.value = null
         return
       }
       try {
@@ -700,15 +819,38 @@ async function handleSend() {
 
         if (payload?.error) {
           const errMsg = payload.error?.message || '工具/模型返回错误'
-          appendMessage({ role: 'assistant', content: errMsg, meta: { error: payload.error } })
+          if (currentAssistantIndex !== null && chatHistory.value[currentAssistantIndex]) {
+            chatHistory.value[currentAssistantIndex].content = errMsg
+            chatHistory.value[currentAssistantIndex].meta = {
+              ...(chatHistory.value[currentAssistantIndex].meta || {}),
+              error: payload.error,
+              pending: false,
+            }
+          }
+          else {
+            appendMessage({ role: 'assistant', content: errMsg, meta: { error: payload.error } })
+          }
           sending.value = false
           controller.value = null
+          streamStatus.value = null
           return
+        }
+
+        if (payload?.status && typeof payload.status === 'object') {
+          streamStatus.value = {
+            code: String(payload.status.code || ''),
+            label: String(payload.status.label || '处理中'),
+            meta: payload.status.meta && typeof payload.status.meta === 'object' ? payload.status.meta : {},
+          }
+          if (String(payload.status.code || '') === 'approval_required') {
+            void loadMessages(activeSessionId.value)
+          }
         }
 
         if (choice?.finish_reason === 'stop') {
           sending.value = false
           controller.value = null
+          streamStatus.value = null
         }
 
         const hasDeltaContent = typeof deltaContent === 'string'
@@ -726,12 +868,22 @@ async function handleSend() {
             if (typeof deltaContent === 'string') {
               initialContent = deltaContent
             }
-            chatHistory.value.push({
-              role: 'assistant',
-              content: initialContent,
-              meta: initialMeta,
-            })
-            currentAssistantIndex = chatHistory.value.length - 1
+            if (currentAssistantIndex !== null && chatHistory.value[currentAssistantIndex] && !hasVisibleMessageContent(chatHistory.value[currentAssistantIndex])) {
+              chatHistory.value[currentAssistantIndex].content = initialContent
+              chatHistory.value[currentAssistantIndex].meta = {
+                ...(chatHistory.value[currentAssistantIndex].meta || {}),
+                ...initialMeta,
+                pending: false,
+              }
+            }
+            else {
+              chatHistory.value.push({
+                role: 'assistant',
+                content: initialContent,
+                meta: initialMeta,
+              })
+              currentAssistantIndex = chatHistory.value.length - 1
+            }
             currentAssistantMessageId = messageId
             if (Array.isArray(deltaContent)) {
               appendAssistantDeltaParts(chatHistory.value[currentAssistantIndex], deltaContent)
@@ -795,20 +947,34 @@ async function handleSend() {
       }
     },
     onclose() {
+      cleanupPendingAssistant(currentAssistantIndex)
       sending.value = false
       controller.value = null
+      streamStatus.value = null
     },
     onerror(err) {
+      cleanupPendingAssistant(currentAssistantIndex)
       sending.value = false
       controller.value = null
+      streamStatus.value = null
+      if (isSessionBusyError(err)) {
+        sessionNotice.value = SESSION_BUSY_MESSAGE
+        return
+      }
       message.error(err?.message || '会话连接失败')
       throw err
     },
   }).catch((err) => {
     if (err?.name === 'AbortError')
       return
+    cleanupPendingAssistant(currentAssistantIndex)
     sending.value = false
     controller.value = null
+    streamStatus.value = null
+    if (isSessionBusyError(err)) {
+      sessionNotice.value = SESSION_BUSY_MESSAGE
+      return
+    }
     message.error(err?.message || '会话连接失败')
   })
 }
@@ -916,6 +1082,7 @@ watch(activeSessionId, (val, prev) => {
     return
   if (prev !== null && prev !== undefined)
     handleAbort()
+  sessionNotice.value = ''
   if (val) {
     loadMessages(val)
     // 移动端选择会话后自动关闭侧边栏
@@ -1103,12 +1270,11 @@ watch(activeSessionId, (val, prev) => {
                     <div class="text-sm md:text-base font-semibold truncate">
                       {{ sessions.find(s => s.id === activeSessionId)?.title || `会话 #${activeSessionId}` }}
                     </div>
-                    <!-- 发送中状态标签 -->
-                    <div v-if="sending" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10">
+                    <div v-if="sending" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full" :class="streamStatusTone === 'warning' ? 'bg-amber-500/10 text-amber-600' : streamStatusTone === 'info' ? 'bg-sky-500/10 text-sky-600' : 'bg-primary/10 text-primary'">
                       <span class="size-1.5 rounded-full bg-primary animate-bounce" style="animation-delay: 0ms" />
                       <span class="size-1.5 rounded-full bg-primary animate-bounce" style="animation-delay: 150ms" />
                       <span class="size-1.5 rounded-full bg-primary animate-bounce" style="animation-delay: 300ms" />
-                      <span class="text-xs text-primary font-medium ml-0.5">回复中</span>
+                      <span class="text-xs font-medium ml-0.5">{{ streamStatusText || '回复中' }}</span>
                     </div>
                   </div>
                   <div class="text-xs text-muted mt-0.5">
@@ -1255,6 +1421,11 @@ watch(activeSessionId, (val, prev) => {
                             </div>
                           </div>
                         </div>
+                        <div v-else-if="isPendingAssistant(msg)" class="flex items-center gap-1.5 py-1">
+                          <span class="size-1.5 rounded-full bg-primary/60 animate-bounce" style="animation-delay: 0ms" />
+                          <span class="size-1.5 rounded-full bg-primary/60 animate-bounce" style="animation-delay: 150ms" />
+                          <span class="size-1.5 rounded-full bg-primary/60 animate-bounce" style="animation-delay: 300ms" />
+                        </div>
                         <div
                           v-else
                           class="prose prose-sm max-w-none prose-p:my-1.5 "
@@ -1333,27 +1504,6 @@ watch(activeSessionId, (val, prev) => {
                     </div>
                   </div>
 
-                  <!-- 等待回复动画 -->
-                  <div v-if="sending" class="flex gap-2.5 md:gap-3 justify-start animate-fade-in">
-                    <div class="flex-none">
-                      <div class="size-9 md:size-10 rounded-full bg-gradient-to-br from-primary via-primary to-primary/80 flex items-center justify-center">
-                        <i class="i-tabler:robot text-lg md:text-xl text-white" />
-                      </div>
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                      <div class="text-sm font-semibold px-3 text-primary">
-                        助手
-                      </div>
-                      <div class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm">
-                        <div class="flex items-center gap-1.5">
-                          <span class="size-1.5 rounded-full bg-primary/60 animate-bounce" style="animation-delay: 0ms" />
-                          <span class="size-1.5 rounded-full bg-primary/60 animate-bounce" style="animation-delay: 150ms" />
-                          <span class="size-1.5 rounded-full bg-primary/60 animate-bounce" style="animation-delay: 300ms" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
                   <div class="h-[200px]" />
                 </div>
               </div>
@@ -1415,7 +1565,17 @@ watch(activeSessionId, (val, prev) => {
             v-if="activeSessionId"
             class="absolute bottom-0 left-0 right-0 flex justify-center pointer-events-none px-4"
           >
-            <div class="w-full max-w-4xl pointer-events-auto">
+              <div class="w-full max-w-4xl pointer-events-auto">
+              <div v-if="!sending && sessionNotice" class="mb-2 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-xs text-amber-700 shadow-sm dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                <i class="i-tabler:clock-hour-4 text-sm" />
+                <span>{{ sessionNotice }}</span>
+              </div>
+              <div v-if="sending && streamStatusText" class="mb-2 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs shadow-sm bg-white/95 dark:bg-gray-900/95"
+                :class="streamStatusTone === 'warning' ? 'border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-300' : streamStatusTone === 'info' ? 'border-sky-200 text-sky-700 dark:border-sky-800 dark:text-sky-300' : 'border-primary/20 text-primary'"
+              >
+                <i class="i-tabler:loader-2 animate-spin text-sm" />
+                <span>{{ streamStatusText }}</span>
+              </div>
               <!-- 输入框容器 -->
               <div class="overflow-hidden bg-white dark:bg-gray-800 border rounded-xl border-gray-200 dark:border-gray-700 shadow-lg shadow-black/5">
                 <!-- 附件预览 -->

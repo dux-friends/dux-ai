@@ -10,6 +10,16 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+
+## [0.2.7] - 2026-03-14
+
+- chore: 优化配置参数
+
+## [0.2.6] - 2026-03-14
+
+- feat: 增加监听事件
+
 ## [0.2.5] - 2026-03-11
 
 - 优化依赖包

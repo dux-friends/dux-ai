@@ -33,7 +33,7 @@
         "thiagoalessio/tesseract_ocr": "^2.13",
         "spatie/pdf-to-image": "^3.2",
         "php-ffmpeg/php-ffmpeg": "^1.4",
-        "duxweb/dux-lite-runtime": "^0.0.4",
+        "duxweb/dux-lite-runtime": "^0.1.0",
         "ramsey/uuid": "^4.9.2"
     },
     "require-dev": {
@@ -63,5 +63,11 @@
         }
     },
     "minimum-stability": "dev",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://mirrors.tencent.com/composer/"
+        }
+    ]
 }

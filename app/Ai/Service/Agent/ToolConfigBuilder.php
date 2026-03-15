@@ -60,6 +60,17 @@ final class ToolConfigBuilder
             }
 
             $description = (string)($tool['description'] ?? $registered['description'] ?? '');
+            $riskLevel = '';
+            if (isset($registered['risk_level'])) {
+                $riskLevel = $registered['risk_level'];
+            }
+            if (!$riskLevel) {
+                $riskLevel = 'safe';
+            }
+            $actions = [];
+            if (isset($registered['actions'])) {
+                $actions = (array)$registered['actions'];
+            }
             $defs[] = [
                 'type' => 'function',
                 'function' => [
@@ -74,6 +85,8 @@ final class ToolConfigBuilder
                 'description' => $description,
                 'schema' => $schema,
                 'label' => $tool['label'] ?? $registered['label'] ?? $name,
+                'risk_level' => $riskLevel,
+                'actions' => $actions,
             ]);
         }
 

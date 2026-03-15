@@ -47,9 +47,9 @@ final class Agent
     /**
      * @return array<int, array<string, mixed>>
      */
-    public static function listMessages(int $sessionId, int $limit = 0): array
+    public static function listMessages(int $sessionId, int $limit = 0, int $afterId = 0): array
     {
-        return self::service()->listMessages($sessionId, $limit);
+        return self::service()->listMessages($sessionId, $limit, $afterId);
     }
 
     public static function renameSession(int $sessionId, ?string $title): array
@@ -79,6 +79,21 @@ final class Agent
     public static function estimateTokensForText(string $text): int
     {
         return self::service()->estimateTokensForText($text);
+    }
+
+    /**
+     * @param array<string, mixed> $initialToolResult
+     * @param array<int, array<string, mixed>> $continuationMessages
+     * @param array<int, string> $excludeTools
+     */
+    public static function continueAfterToolResult(
+        int $sessionId,
+        array $initialToolResult = [],
+        array $continuationMessages = [],
+        array $excludeTools = [],
+    ): void
+    {
+        self::service()->continueAfterToolResult($sessionId, $initialToolResult, $continuationMessages, $excludeTools);
     }
 
     private static function service(): AgentService

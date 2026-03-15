@@ -13,6 +13,5 @@ class App extends AppExtend
     public function register(Bootstrap $app): void
     {
         ParseFactory::migrateLegacyProviders();
-        // Registered by attribute listeners in app/Ai/Listener.
     }
 }

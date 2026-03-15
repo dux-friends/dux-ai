@@ -26,14 +26,20 @@ final class ToolFactory
     /**
      * @return array{tools: array<int, ToolInterface|ToolkitInterface>, map: array<string, array<string, mixed>>}
      */
-    public static function buildForAgent(AiAgent $agent, int $sessionId = 0): array
+    public static function buildForAgent(AiAgent $agent, int $sessionId = 0, array $excludeCodes = []): array
     {
         $toolsConfig = AgentToolConfigBuilder::build($agent);
         $toolMap = $toolsConfig['map'] ?? [];
+        $excludeCodes = array_values(array_filter(array_map(static fn (mixed $item): string => trim((string)$item), $excludeCodes)));
         $tools = [];
 
         foreach ($toolMap as $toolName => $meta) {
             if (!is_string($toolName) || trim($toolName) === '' || !is_array($meta)) {
+                continue;
+            }
+            $toolCode = trim((string)($meta['code'] ?? ''));
+            if ($toolCode !== '' && in_array($toolCode, $excludeCodes, true)) {
+                unset($toolMap[$toolName]);
                 continue;
             }
 
@@ -43,24 +49,9 @@ final class ToolFactory
             $description = (string)($meta['description'] ?? '');
             $agentId = (int)$agent->id;
 
+            $toolCode = (string)($meta['code'] ?? '');
             $tool = Tool::make($toolName, $description, $properties)
-                ->setCallable(static function (...$args) use ($meta, $sessionId, $agentId) {
-
-                    $toolCode = (string)($meta['code'] ?? '');
-                    if ($toolCode === '') {
-                        throw new ExceptionBusiness(sprintf('工具 [%s] 配置缺失 code', (string)($meta['label'] ?? 'unknown')));
-                    }
-
-                    try {
-                        return ToolService::execute($toolCode, [
-                            ...$meta,
-                            '__session_id' => $sessionId,
-                            '__agent_id' => $agentId,
-                        ], $args);
-                    } catch (Throwable $e) {
-                        return self::encodeToolError($e);
-                    }
-                });
+                ->setCallable(new AgentToolExecutor($toolCode, $meta, $sessionId, $agentId));
 
             $tools[] = $tool;
         }
@@ -155,7 +146,7 @@ final class ToolFactory
         return $schema;
     }
 
-    private static function encodeToolError(Throwable $throwable): string
+    public static function encodeToolError(Throwable $throwable): string
     {
         $debugMessage = trim($throwable->getMessage());
         if ($debugMessage === '') {

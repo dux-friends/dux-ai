@@ -91,4 +91,21 @@ final class Sse
             ],
         ]);
     }
+
+    /**
+     * @param array<string, mixed> $meta
+     */
+    public static function statusChunk(int $sessionId, string $status, string $label, array $meta = []): string
+    {
+        return self::format([
+            'session_id' => $sessionId,
+            'object' => 'chat.status.chunk',
+            'created' => time(),
+            'status' => [
+                'code' => $status,
+                'label' => $label,
+                'meta' => $meta,
+            ],
+        ]);
+    }
 }

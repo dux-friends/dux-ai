@@ -11,7 +11,6 @@ final class SessionManager
 {
     public static function ensureSessionId(AiAgent $agent, ?int $sessionId = null, ?string $userType = null, ?int $userId = null): int
     {
-        // 查找会话时过滤用户上下文
         if (!$sessionId) {
             $query = AiAgentSession::query()
                 ->where('agent_id', $agent->id);
@@ -24,7 +23,6 @@ final class SessionManager
             $sessionId = (int)($query->orderByDesc('id')->value('id') ?? 0);
         }
 
-        // 创建会话时绑定用户
         if (!$sessionId) {
             $sessionId = (int)AiAgentSession::query()->create([
                 'agent_id' => $agent->id,
@@ -37,9 +35,6 @@ final class SessionManager
         return $sessionId;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
     public static function createSessionByCode(string $agentCode, ?string $userType = null, ?int $userId = null): array
     {
         $agent = AgentResolver::requireByCode($agentCode);
@@ -52,9 +47,6 @@ final class SessionManager
         return $session->transform();
     }
 
-    /**
-     * @return array<int, array<string, mixed>>
-     */
     public static function listSessionsByCode(?string $agentCode = null, int $limit = 20, ?string $userType = null, ?int $userId = null): array
     {
         $query = AiAgentSession::query();
@@ -87,9 +79,6 @@ final class SessionManager
             ->all();
     }
 
-    /**
-     * @return array<string, mixed>
-     */
     public static function renameSession(int $sessionId, ?string $title): array
     {
         $session = AiAgentSession::query()->findOrFail($sessionId);
