@@ -32,6 +32,12 @@ abstract class AbstractVectorStore implements VectorStoreInterface
         return $this;
     }
 
+    public function deleteBy(string $sourceType, ?string $sourceName = null): VectorStoreInterface
+    {
+        $this->inner->deleteBy($sourceType, $sourceName);
+        return $this;
+    }
+
     /**
      * @param float[] $embedding
      * @return iterable<Document>

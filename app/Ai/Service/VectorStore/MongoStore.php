@@ -135,17 +135,24 @@ final class MongoStore implements VectorStoreInterface
 
     public function deleteBySource(string $sourceType, string $sourceName): VectorStoreInterface
     {
+        return $this->deleteBy($sourceType, $sourceName);
+    }
+
+    public function deleteBy(string $sourceType, ?string $sourceName = null): VectorStoreInterface
+    {
         $sourceType = trim($sourceType);
-        $sourceName = trim($sourceName);
-        if ($sourceType === '' || $sourceName === '') {
+        $sourceName = $sourceName === null ? null : trim($sourceName);
+        if ($sourceType === '') {
             return $this;
         }
 
+        $filter = ['sourceType' => $sourceType];
+        if ($sourceName !== null && $sourceName !== '') {
+            $filter['sourceName'] = $sourceName;
+        }
+
         try {
-            $this->collection->deleteMany([
-                'sourceType' => $sourceType,
-                'sourceName' => $sourceName,
-            ]);
+            $this->collection->deleteMany($filter);
         } catch (\Throwable $e) {
             throw new ExceptionBusiness('MongoDB 删除失败：' . $e->getMessage());
         }
@@ -230,4 +237,3 @@ final class MongoStore implements VectorStoreInterface
         return $out;
     }
 }
-

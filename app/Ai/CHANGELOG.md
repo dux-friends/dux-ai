@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+## [0.2.3] - 2026-03-20
+
+- fix: 更新适配最新 ai 依赖
+
 ## [0.2.2] - 2026-03-16
 
 - feat: 优化会话发送限流

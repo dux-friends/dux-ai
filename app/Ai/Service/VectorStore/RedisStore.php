@@ -127,15 +127,24 @@ final class RedisStore implements VectorStoreInterface
 
     public function deleteBySource(string $sourceType, string $sourceName): VectorStoreInterface
     {
+        return $this->deleteBy($sourceType, $sourceName);
+    }
+
+    public function deleteBy(string $sourceType, ?string $sourceName = null): VectorStoreInterface
+    {
         $sourceType = trim($sourceType);
-        $sourceName = trim($sourceName);
-        if ($sourceType === '' || $sourceName === '') {
+        $sourceName = $sourceName === null ? null : trim($sourceName);
+        if ($sourceType === '') {
             return $this;
         }
 
         $this->ensureIndex();
 
-        $query = sprintf('@sourceType:{%s} @sourceName:{%s}', self::escapeTagValue($sourceType), self::escapeTagValue($sourceName));
+        $query = sprintf('@sourceType:{%s}', self::escapeTagValue($sourceType));
+        if ($sourceName !== null && $sourceName !== '') {
+            $query .= sprintf(' @sourceName:{%s}', self::escapeTagValue($sourceName));
+        }
+
         $resp = $this->redis->executeRaw([
             'FT.SEARCH',
             $this->index,
@@ -371,4 +380,3 @@ final class RedisStore implements VectorStoreInterface
         return $docs;
     }
 }
-
