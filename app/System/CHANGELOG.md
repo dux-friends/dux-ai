@@ -14,6 +14,26 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+
+
+
+## [0.2.11] - 2026-03-21
+
+- Update
+
+## [0.2.10] - 2026-03-21
+
+- Update
+
+## [0.2.10] - 2026-03-21
+
+- Update
+
+## [0.2.9] - 2026-03-21
+
+- feat: 增加说明文件
+
 ## [0.2.8] - 2026-03-19
 
 - Update
