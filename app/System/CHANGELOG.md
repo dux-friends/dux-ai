@@ -18,6 +18,11 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+## [0.2.12] - 2026-03-25
+
+- feat: 更新最新依赖
+
 ## [0.2.11] - 2026-03-21
 
 - Update

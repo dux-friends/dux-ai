@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0a49beb750ddc0d2de923aff24eede4d",
+    "content-hash": "acd2367b8c83de8ea1b7e551778cc630",
     "packages": [
         {
             "name": "aws/aws-crt-php",
@@ -1241,11 +1241,11 @@
         },
         {
             "name": "duxweb/dux-lite-cloud",
-            "version": "v0.0.4",
+            "version": "v0.0.7",
             "dist": {
                 "type": "zip",
-                "url": "https://mirrors.tencent.com/repository/composer/duxweb/dux-lite-cloud/v0.0.4/duxweb-dux-lite-cloud-v0.0.4.zip",
-                "reference": "e3ed2b838eec13e4414370673e44714d30ab69fb",
+                "url": "https://mirrors.tencent.com/repository/composer/duxweb/dux-lite-cloud/v0.0.7/duxweb-dux-lite-cloud-v0.0.7.zip",
+                "reference": "82c14c3aa8155188f4dbce90e4d1caddb7ecab45",
                 "shasum": ""
             },
             "require": {
@@ -1279,9 +1279,9 @@
             "description": "DuxLite v2 cloud service expansion package",
             "support": {
                 "issues": "https://github.com/duxweb/dux-lite-cloud/issues",
-                "source": "https://github.com/duxweb/dux-lite-cloud/tree/v0.0.4"
+                "source": "https://github.com/duxweb/dux-lite-cloud/tree/v0.0.7"
             },
-            "time": "2026-03-10T06:34:00+00:00"
+            "time": "2026-03-21T04:08:29+00:00"
         },
         {
             "name": "duxweb/dux-lite-runtime",
