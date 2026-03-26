@@ -36,7 +36,7 @@ final class UploadedFileStorage
 
         $storage = $knowledge->config?->storage;
         if (!$storage || !$storage->name) {
-            throw new ExceptionBusiness('请先在知识库配置中设置存储驱动');
+            throw new ExceptionBusiness('请先在知识库引擎中设置存储驱动');
         }
 
         $pathInfo = UploadService::generatePath($originalName, $mime, 'ai/rag');
@@ -62,4 +62,3 @@ final class UploadedFileStorage
         ];
     }
 }
-

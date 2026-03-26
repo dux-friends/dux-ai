@@ -6,6 +6,10 @@ namespace App\Ai\Service\Neuron\Structured;
 
 use App\Ai\Models\AiModel;
 use App\Ai\Service\AI;
+use App\Ai\Service\Neuron\Agent\ModelRateLimiter;
+use App\Ai\Service\Neuron\Agent\TokenEstimator;
+use App\Ai\Service\Usage\UsageResolver;
+use App\Ai\Support\AiRuntime;
 use Core\Handlers\ExceptionBusiness;
 use NeuronAI\Chat\Messages\UserMessage;
 
@@ -55,6 +59,11 @@ final class StructuredOutputService
                 }
                 $errors[] = '结构化 Schema 格式无效';
             } else {
+                $reservation = self::acquireRateReservation($model, $prompt, $systemPrompt, [
+                    'mode' => 'structured',
+                    'provider_overrides' => $providerOverrides,
+                    'structured_schema' => $structuredSchema,
+                ]);
                 try {
                     $provider = AI::forModel($model, array_merge($providerOverrides, [
                         '__structured_strict' => true,
@@ -77,6 +86,11 @@ final class StructuredOutputService
                     if ($violations !== []) {
                         throw new ExceptionBusiness('结构化校验失败：' . implode('；', $violations));
                     }
+                    self::finalizeRateReservation(
+                        $reservation,
+                        $response->getUsage()?->jsonSerialize(),
+                        is_string($raw) ? $raw : (json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+                    );
 
                     return [
                         'mode_used' => 'structured',
@@ -88,6 +102,7 @@ final class StructuredOutputService
                         'errors' => $errors,
                     ];
                 } catch (\Throwable $e) {
+                    self::finalizeRateReservation($reservation, null, '', (int)($reservation['requested_tokens'] ?? 0));
                     $errors[] = $e->getMessage();
                     if ($outputMode === 'structured') {
                         throw new ExceptionBusiness('结构化输出失败：' . $e->getMessage());
@@ -96,12 +111,26 @@ final class StructuredOutputService
             }
         }
 
+        $reservation = self::acquireRateReservation($model, $prompt, $systemPrompt, [
+            'mode' => 'text',
+            'provider_overrides' => $providerOverrides,
+        ]);
         $provider = AI::forModel($model, $providerOverrides, $timeoutSeconds);
         if ($systemPrompt !== null && trim($systemPrompt) !== '') {
             $provider->systemPrompt($systemPrompt);
         }
-        $response = $provider->chat(UserMessage::make($prompt));
-        $content = $response->getContent();
+        try {
+            $response = $provider->chat(UserMessage::make($prompt));
+            $content = $response->getContent();
+            self::finalizeRateReservation(
+                $reservation,
+                $response->getUsage()?->jsonSerialize(),
+                is_string($content) ? $content : (json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+            );
+        } catch (\Throwable $e) {
+            self::finalizeRateReservation($reservation, null, '', (int)($reservation['requested_tokens'] ?? 0));
+            throw $e;
+        }
 
         return [
             'mode_used' => 'text',
@@ -159,6 +188,54 @@ final class StructuredOutputService
             return 'auto';
         }
         return $mode;
+    }
+
+    /**
+     * @param array<string, mixed> $extra
+     * @return array{
+     *     enabled: bool,
+     *     model_key: string,
+     *     reservation_id: string,
+     *     limit: int,
+     *     requested_tokens: int,
+     *     used_tokens: int,
+     *     waited_ms: int,
+     *     forced: bool
+     * }
+     */
+    private static function acquireRateReservation(AiModel $model, string $prompt, ?string $systemPrompt, array $extra = []): array
+    {
+        $modelOptions = is_array($model->options ?? null) ? ($model->options ?? []) : [];
+        $budget = TokenEstimator::estimateTextBudget($prompt, $systemPrompt, $modelOptions, $extra);
+        $reservation = ModelRateLimiter::acquireForModel($model, (int)$budget['total']);
+
+        if ((int)($reservation['waited_ms'] ?? 0) > 0) {
+            AiRuntime::instance()->log('ai.model')->info('ai.model.rate_limit', [
+                'model_id' => (int)$model->id,
+                'model_code' => (string)($model->code ?? ''),
+                'requested_tokens' => (int)($reservation['requested_tokens'] ?? 0),
+                'limit' => (int)($reservation['limit'] ?? 0),
+                'waited_ms' => (int)($reservation['waited_ms'] ?? 0),
+                'mode' => (string)($extra['mode'] ?? 'text'),
+            ]);
+        }
+
+        return $reservation;
+    }
+
+    private static function finalizeRateReservation(array $reservation, mixed $usage, string $content, int $fallbackTokens = 0): void
+    {
+        if (!($reservation['enabled'] ?? false)) {
+            return;
+        }
+
+        $resolved = is_array($usage) ? UsageResolver::normalizeUsage($usage) : null;
+        $actualTokens = $resolved['total_tokens'] ?? 0;
+        if ($actualTokens <= 0) {
+            $actualTokens = max($fallbackTokens, (int)UsageResolver::fromUsageOrEstimate(null, $content)['total_tokens']);
+        }
+
+        ModelRateLimiter::finalize($reservation, $actualTokens);
     }
 
     /**

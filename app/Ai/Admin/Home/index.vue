@@ -69,6 +69,15 @@ function handleChat(row: any, sessionId?: number) {
   }
 }
 
+function handleCreateSession() {
+  const target = sessions.value[0] || agents.value[0]
+  if (!target) {
+    message.warning('暂无可用智能体')
+    return
+  }
+  handleChat(target)
+}
+
 function handleExecute(flow: any) {
   if (!flow.id)
     return
@@ -268,6 +277,33 @@ onMounted(() => {
           </div>
 
           <div v-if="sessions.length" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div
+              class="group relative rounded-2xl border border-dashed border-primary/40 bg-gradient-to-br from-primary/6 via-primary/3 to-transparent p-6 cursor-pointer transition-all duration-300 hover:border-primary hover:shadow-xl hover:-translate-y-1"
+              @click="handleCreateSession"
+            >
+              <div class="relative h-full flex flex-col">
+                <div class="flex items-start gap-4 mb-4">
+                  <div class="size-14 rounded-xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center flex-none shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">
+                    <i class="i-tabler:plus text-2xl text-white" />
+                  </div>
+
+                  <div class="flex-1 min-w-0">
+                    <h3 class="text-lg font-semibold text-default truncate mb-1">
+                      新建会话
+                    </h3>
+                    <div class="flex items-center gap-2 text-sm text-muted">
+                      <i class="i-tabler:sparkles" />
+                      <span class="truncate">快速开启一轮新的 AI 对话</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-auto flex items-center justify-end text-sm text-primary font-medium group-hover:gap-2 transition-all">
+                  <span>立即开始</span>
+                  <i class="i-tabler:arrow-right" />
+                </div>
+              </div>
+            </div>
             <div
               v-for="session in sessions"
               :key="session.id"

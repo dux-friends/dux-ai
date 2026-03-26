@@ -9,6 +9,7 @@ use App\Ai\Service\Agent\ToolConfigBuilder as AgentToolConfigBuilder;
 use App\Ai\Service\Neuron\Mcp\McpToolkitFactory;
 use App\Ai\Service\Neuron\Toolkit\SystemToolkit;
 use App\Ai\Service\Tool as ToolService;
+use App\Ai\Service\Toolkit as ToolkitService;
 use Core\Handlers\ExceptionBusiness;
 use Throwable;
 use NeuronAI\Tools\ArrayProperty;
@@ -32,6 +33,7 @@ final class ToolFactory
         $toolMap = $toolsConfig['map'] ?? [];
         $excludeCodes = array_values(array_filter(array_map(static fn (mixed $item): string => trim((string)$item), $excludeCodes)));
         $tools = [];
+        $boundCodes = [];
 
         foreach ($toolMap as $toolName => $meta) {
             if (!is_string($toolName) || trim($toolName) === '' || !is_array($meta)) {
@@ -43,41 +45,54 @@ final class ToolFactory
                 continue;
             }
 
-            $schema = is_array($meta['schema'] ?? null) ? ($meta['schema'] ?? []) : [];
-            $schema = self::stripFixedConfigPropertiesFromSchema($schema, $meta);
-            $properties = self::schemaToProperties($schema);
-            $description = (string)($meta['description'] ?? '');
-            $agentId = (int)$agent->id;
-
-            $toolCode = (string)($meta['code'] ?? '');
-            $tool = Tool::make($toolName, $description, $properties)
-                ->setCallable(new AgentToolExecutor($toolCode, $meta, $sessionId, $agentId));
-
-            $tools[] = $tool;
+            $tools[] = self::makeCapabilityTool($toolName, $meta, $sessionId, (int)$agent->id);
+            if ($toolCode !== '') {
+                $boundCodes[$toolCode] = true;
+            }
         }
 
         foreach (self::resolveToolkitItems($agent) as $item) {
-            $toolkit = self::createToolkit($item);
-            if ($toolkit === null) {
+            $toolkit = self::createToolkitTools($item, $sessionId, (int)$agent->id, $boundCodes, $excludeCodes);
+            if (($toolkit['tools'] ?? []) === []) {
                 continue;
             }
 
-            if (is_array($toolkit)) {
-                foreach ($toolkit as $tool) {
-                    if ($tool instanceof ToolInterface) {
-                        $tools[] = $tool;
-                    }
+            foreach (($toolkit['tools'] ?? []) as $tool) {
+                if ($tool instanceof ToolInterface || $tool instanceof ToolkitInterface) {
+                    $tools[] = $tool;
                 }
-                continue;
             }
-
-            $tools[] = $toolkit;
+            foreach (($toolkit['map'] ?? []) as $toolName => $meta) {
+                if (!is_string($toolName) || !is_array($meta)) {
+                    continue;
+                }
+                $toolMap[$toolName] = $meta;
+                $toolCode = trim((string)($meta['code'] ?? ''));
+                if ($toolCode !== '') {
+                    $boundCodes[$toolCode] = true;
+                }
+            }
         }
 
         return [
             'tools' => $tools,
             'map' => $toolMap,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $meta
+     */
+    private static function makeCapabilityTool(string $toolName, array $meta, int $sessionId, int $agentId): ToolInterface
+    {
+        $schema = is_array($meta['schema'] ?? null) ? ($meta['schema'] ?? []) : [];
+        $schema = self::stripFixedConfigPropertiesFromSchema($schema, $meta);
+        $properties = self::schemaToProperties($schema);
+        $description = (string)($meta['description'] ?? '');
+        $toolCode = (string)($meta['code'] ?? '');
+
+        return Tool::make($toolName, $description, $properties)
+            ->setCallable(new AgentToolExecutor($toolCode, $meta, $sessionId, $agentId));
     }
 
     /**
@@ -382,21 +397,116 @@ final class ToolFactory
     }
 
     /**
-     * @param array<string, mixed> $item
-     * @return ToolkitInterface|array<int, ToolInterface>|null
+     * @param array<string, bool> $boundCodes
+     * @param array<int, string> $excludeCodes
+     * @return array{tools: array<int, ToolInterface|ToolkitInterface>, map: array<string, array<string, mixed>>}
      */
-    private static function createToolkit(array $item): ToolkitInterface|array|null
+    private static function createToolkitTools(array $item, int $sessionId, int $agentId, array $boundCodes, array $excludeCodes): array
     {
         $type = strtolower(trim((string)($item['toolkit'] ?? $item['code'] ?? $item['name'] ?? '')));
         if ($type === '') {
-            return null;
+            return ['tools' => [], 'map' => []];
+        }
+
+        $meta = ToolkitService::get($type);
+        if ($meta) {
+            $handler = $meta['handler'] ?? null;
+            if (is_callable($handler)) {
+                $built = $handler($item, $meta);
+                if ($built instanceof ToolkitInterface) {
+                    return ['tools' => [$built], 'map' => []];
+                }
+                if (is_array($built)) {
+                    $tools = [];
+                    foreach ($built as $tool) {
+                        if ($tool instanceof ToolInterface || $tool instanceof ToolkitInterface) {
+                            $tools[] = $tool;
+                        }
+                    }
+                    return ['tools' => $tools, 'map' => []];
+                }
+            }
+
+            return self::expandRegisteredToolkit($item, $meta, $sessionId, $agentId, $boundCodes, $excludeCodes);
         }
 
         return match ($type) {
-            'system', 'toolkit.system' => SystemToolkit::make(),
-            'calculator', 'toolkit.calculator' => CalculatorToolkit::make(),
-            'mcp', 'toolkit.mcp' => McpToolkitFactory::tools($item),
-            default => null,
+            'system', 'toolkit.system' => ['tools' => [SystemToolkit::make()], 'map' => []],
+            'calculator', 'toolkit.calculator' => ['tools' => [CalculatorToolkit::make()], 'map' => []],
+            'mcp', 'toolkit.mcp' => ['tools' => McpToolkitFactory::tools($item), 'map' => []],
+            default => ['tools' => [], 'map' => []],
         };
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @param array<string, mixed> $meta
+     * @param array<string, bool> $boundCodes
+     * @param array<int, string> $excludeCodes
+     * @return array{tools: array<int, ToolInterface>, map: array<string, array<string, mixed>>}
+     */
+    private static function expandRegisteredToolkit(array $item, array $meta, int $sessionId, int $agentId, array $boundCodes, array $excludeCodes): array
+    {
+        $sharedConfig = is_array($meta['defaults'] ?? null) ? ($meta['defaults'] ?? []) : [];
+        if (is_array($item['config'] ?? null)) {
+            $sharedConfig = array_replace($sharedConfig, $item['config']);
+        }
+        $overrides = is_array($item['overrides'] ?? null) ? ($item['overrides'] ?? []) : [];
+
+        $tools = [];
+        $map = [];
+        $items = is_array($meta['items'] ?? null) ? ($meta['items'] ?? []) : [];
+        foreach ($items as $toolItem) {
+            if (!is_array($toolItem)) {
+                continue;
+            }
+            $toolCode = trim((string)($toolItem['code'] ?? ''));
+            if ($toolCode === '' || isset($boundCodes[$toolCode]) || in_array($toolCode, $excludeCodes, true)) {
+                continue;
+            }
+
+            $registered = ToolService::get($toolCode);
+            if (!$registered) {
+                continue;
+            }
+
+            $toolConfig = array_replace(
+                $registered,
+                $sharedConfig,
+                is_array($overrides[$toolCode] ?? null) ? ($overrides[$toolCode] ?? []) : [],
+                [
+                    'code' => $toolCode,
+                    'label' => $toolItem['label'] ?? $registered['label'] ?? $toolCode,
+                    'description' => $toolItem['description'] ?? $registered['description'] ?? '',
+                ]
+            );
+            $toolName = self::sanitizeToolName(
+                is_string($toolConfig['function'] ?? null) && trim((string)$toolConfig['function']) !== ''
+                    ? trim((string)$toolConfig['function'])
+                    : (string)($toolConfig['name'] ?? $toolCode)
+            );
+            if ($toolName === '' || isset($map[$toolName])) {
+                continue;
+            }
+
+            $tools[] = self::makeCapabilityTool($toolName, $toolConfig, $sessionId, $agentId);
+            $map[$toolName] = $toolConfig;
+        }
+
+        return [
+            'tools' => $tools,
+            'map' => $map,
+        ];
+    }
+
+    private static function sanitizeToolName(string $name): string
+    {
+        $name = strtolower(trim($name));
+        if ($name === '') {
+            return '';
+        }
+        $name = preg_replace('/[^a-z0-9_\\-]/', '_', $name) ?: '';
+        $name = preg_replace('/_+/', '_', $name) ?: '';
+        return trim($name, '_');
     }
 }

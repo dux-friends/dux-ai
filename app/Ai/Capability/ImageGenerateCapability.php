@@ -8,6 +8,7 @@ use App\Ai\Interface\CapabilityContextInterface;
 use App\Ai\Models\AiModel;
 use App\Ai\Models\AiProvider;
 use App\Ai\Service\AI;
+use App\Ai\Service\AiConfig;
 use App\Ai\Service\Neuron\Image\ImageProvider;
 use App\Ai\Support\AiRuntime;
 use App\System\Service\Storage as StorageService;
@@ -43,7 +44,10 @@ final class ImageGenerateCapability
     {
         $modelId = (int)($input['model_id'] ?? 0);
         if ($modelId <= 0) {
-            throw new ExceptionBusiness('图片工具缺少 model_id 配置');
+            $modelId = (int)AiConfig::getValue('default_image_model_id', 0);
+        }
+        if ($modelId <= 0) {
+            throw new ExceptionBusiness('图片工具缺少 model_id 配置，请先在 AI 系统设置中设置默认图片模型');
         }
 
         /** @var AiModel|null $model */

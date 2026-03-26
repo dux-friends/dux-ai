@@ -52,6 +52,9 @@ class AiAgent extends Model
         if (!is_array($settings['skill_codes'] ?? null)) {
             $settings['skill_codes'] = [];
         }
+        if (!is_array($settings['toolkits'] ?? null)) {
+            $settings['toolkits'] = [];
+        }
 
         return [
             'id' => $this->id,

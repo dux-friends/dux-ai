@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Admin;
 
 use App\Ai\Models\RagKnowledge as RagKnowledgeModel;
+use App\Ai\Service\AiConfig;
 use App\Ai\Service\Rag;
 use Core\Handlers\ExceptionBusiness;
 use Core\Resources\Action\Resources;
@@ -53,15 +54,19 @@ class RagKnowledge extends Resources
     public function validator(array $data, ServerRequestInterface $request, array $args): array
     {
         return [
-            'config_id' => ['required', '请选择知识库配置'],
             'name' => ['required', '请输入知识库名称'],
         ];
     }
 
     public function format(Data $data, ServerRequestInterface $request, array $args): array
     {
+        $configId = $data->config_id ? (int)$data->config_id : (int)AiConfig::getValue('default_rag_provider_id', 0);
+        if ($configId <= 0) {
+            $configId = null;
+        }
+
         return [
-            'config_id' => (int)$data->config_id,
+            'config_id' => $configId,
             'name' => (string)$data->name,
             'description' => $data->description ?: null,
             'settings' => is_array($data->settings) ? $data->settings : [],
@@ -157,14 +162,14 @@ class RagKnowledge extends Resources
 
     public function createAfter(Data $data, mixed $info): void
     {
-        if ($info instanceof RagKnowledgeModel) {
+        if ($info instanceof RagKnowledgeModel && $info->config_id) {
             Rag::syncKnowledge($info);
         }
     }
 
     public function editAfter(Data $data, mixed $info): void
     {
-        if ($info instanceof RagKnowledgeModel) {
+        if ($info instanceof RagKnowledgeModel && $info->config_id) {
             Rag::syncKnowledge($info);
         }
     }

@@ -59,14 +59,15 @@ function applyPreset(preset: { chunk_size: number, separator: string, word_overl
   >
     <NTabPane name="base" label="基本信息">
       <DuxFormLayout label-placement="top" class="pb-4">
-        <DuxFormItem label="知识库引擎" required tooltip="创建后不建议更换（如需更换建议新建知识库并重建索引）">
+        <DuxFormItem label="知识库引擎" description="留空则使用系统默认知识库引擎" tooltip="创建后不建议更换（如需更换建议新建知识库并重建索引）">
           <DuxSelect
             v-model:value="model.config_id"
             path="ai/ragProvider/options"
             label-field="label"
             value-field="value"
-            placeholder="请选择驱动"
+            placeholder="留空则使用系统默认知识库引擎"
             :disabled="Boolean(props.id)"
+            clearable
           />
         </DuxFormItem>
         <DuxFormItem label="文档库名称" required>
@@ -83,13 +84,13 @@ function applyPreset(preset: { chunk_size: number, separator: string, word_overl
 
     <NTabPane name="settings" label="入库参数">
       <DuxFormLayout label-placement="top" class="pb-4">
-        <DuxFormItem label="解析配置" tooltip="用于解析 PDF/图片 等非纯文本（留空仅支持本地文本/markdown/csv/docx/xlsx）">
+        <DuxFormItem label="解析配置" description="留空则使用系统默认解析配置" tooltip="用于解析 PDF/图片 等非纯文本（留空会优先使用系统默认解析配置）">
           <DuxSelect
             v-model:value="model.settings.parse_provider"
             path="ai/parseProvider"
             label-field="name"
             value-field="id"
-            placeholder="选择解析配置"
+            placeholder="留空则使用系统默认解析配置"
             clearable
           />
         </DuxFormItem>

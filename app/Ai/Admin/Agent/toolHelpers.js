@@ -17,6 +17,18 @@ export function createToolItem() {
   }
 }
 
+export function createToolkitItem() {
+  return {
+    toolkit: undefined,
+    label: '',
+    description: '',
+    config: {},
+    overrides: {},
+    _settings: [],
+    _items: [],
+  }
+}
+
 export const stringifySchema = stringifyJson
 
 export { schemaToTree, toPlain, treeToSchema }
@@ -69,5 +81,39 @@ export function buildToolPayload(tool) {
   if (payload.schema_description)
     payload.schema.description = payload.schema_description
   delete payload.schema_description
+  return payload
+}
+
+export function applyToolkitMeta(toolkit, registry, code) {
+  toolkit.toolkit = code || ''
+  const meta = code ? registry?.[String(code)] || null : null
+  if (!meta)
+    return
+
+  toolkit.label = meta.label || toolkit.label || ''
+  toolkit.description = meta.description || toolkit.description || ''
+  toolkit._settings = Array.isArray(meta.settings) ? toPlain(meta.settings) : []
+  toolkit._items = Array.isArray(meta.items) ? toPlain(meta.items) : []
+  if (!toolkit.config || typeof toolkit.config !== 'object' || Array.isArray(toolkit.config))
+    toolkit.config = {}
+  if (!toolkit.overrides || typeof toolkit.overrides !== 'object' || Array.isArray(toolkit.overrides))
+    toolkit.overrides = {}
+
+  if (meta.defaults && typeof meta.defaults === 'object' && !Array.isArray(meta.defaults)) {
+    Object.entries(meta.defaults).forEach(([key, val]) => {
+      if (toolkit.config[key] === undefined || toolkit.config[key] === null || toolkit.config[key] === '')
+        toolkit.config[key] = val
+    })
+  }
+}
+
+export function buildToolkitPayload(toolkit) {
+  const payload = toPlain(toolkit || {})
+  delete payload._settings
+  delete payload._items
+  if (!payload.config || typeof payload.config !== 'object' || Array.isArray(payload.config))
+    payload.config = {}
+  if (!payload.overrides || typeof payload.overrides !== 'object' || Array.isArray(payload.overrides))
+    payload.overrides = {}
   return payload
 }

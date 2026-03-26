@@ -9,6 +9,7 @@ use App\Ai\Models\AiVector;
 use App\Ai\Models\RagKnowledge;
 use App\Ai\Models\RagKnowledgeData;
 use App\Ai\Models\RegProvider;
+use App\Ai\Service\AiConfig;
 use App\Ai\Service\Rag\AssetDocumentBuilder;
 use App\Ai\Service\Rag\KnowledgeId as RagKnowledgeId;
 use App\Ai\Service\Rag\SourceId as RagSourceId;
@@ -50,7 +51,7 @@ final class Service
     public function ensureSynced(RagKnowledge $knowledge): void
     {
         if (!$knowledge->config) {
-            throw new ExceptionBusiness('知识库未配置文档库配置（RegProvider）');
+            throw new ExceptionBusiness('知识库未配置知识库引擎');
         }
         if (!$knowledge->base_id) {
             $knowledge->base_id = 'neuron:' . (int)$knowledge->id;
@@ -295,9 +296,9 @@ final class Service
 
     private function embeddingsProvider(RegProvider $config): EmbeddingsProviderInterface
     {
-        $modelId = (int)($config->embedding_model_id ?? 0);
+        $modelId = $this->resolveEmbeddingModelId($config);
         if ($modelId <= 0) {
-            throw new ExceptionBusiness('RAG 未配置 Embeddings 模型（embedding_model_id）');
+            throw new ExceptionBusiness('请先配置默认 Embeddings 模型或在知识库引擎中手动选择');
         }
 
         /** @var AiModel|null $model */
@@ -323,7 +324,7 @@ final class Service
 
     private function embeddingDimensions(RegProvider $config): ?int
     {
-        $modelId = (int)($config->embedding_model_id ?? 0);
+        $modelId = $this->resolveEmbeddingModelId($config);
         if ($modelId <= 0) {
             return null;
         }
@@ -349,6 +350,16 @@ final class Service
         }
 
         return VectorStore::make($vector, $knowledgeId, $this->embeddingDimensions($config));
+    }
+
+    private function resolveEmbeddingModelId(RegProvider $config): int
+    {
+        $modelId = (int)($config->embedding_model_id ?? 0);
+        if ($modelId > 0) {
+            return $modelId;
+        }
+
+        return (int)AiConfig::getValue('default_embedding_model_id', 0);
     }
 
 }

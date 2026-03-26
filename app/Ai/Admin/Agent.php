@@ -16,6 +16,7 @@ use App\Ai\Service\AIFlow as ServiceAIFlow;
 use App\Ai\Service\CodeGenerator;
 use App\Ai\Service\FunctionCall;
 use App\Ai\Service\Tool;
+use App\Ai\Service\Toolkit;
 use Core\Resources\Action\Resources;
 use Core\Resources\Attribute\Action;
 use Core\Resources\Attribute\Resource;
@@ -98,6 +99,7 @@ class Agent extends Resources
         }
         $settings['bot_codes'] = array_values(array_unique($botCodes));
         $settings['skill_codes'] = SkillPromptBuilder::normalizeSkillCodes($settings['skill_codes'] ?? []);
+        $settings['toolkits'] = $this->normalizeToolkits($settings['toolkits'] ?? []);
         $this->assertBotBindingsUnique((int)($args['id'] ?? 0), $settings['bot_codes']);
 
         return [
@@ -232,6 +234,30 @@ class Agent extends Resources
         return send($response, 'ok', $list);
     }
 
+    #[Action(methods: 'GET', route: '/toolkit')]
+    public function toolkitOptions(ServerRequestInterface $request, ResponseInterface $response, array $args): ResponseInterface
+    {
+        $list = array_values(array_filter(array_map(static function (array $item) {
+            if (!($item['agent_selectable'] ?? false)) {
+                return null;
+            }
+
+            return [
+                'label' => $item['label'] ?? $item['code'] ?? '',
+                'code' => $item['code'] ?? '',
+                'description' => $item['description'] ?? '',
+                'icon' => $item['icon'] ?? 'i-tabler:tool',
+                'color' => $item['color'] ?? 'primary',
+                'style' => $item['style'] ?? [],
+                'defaults' => $item['defaults'] ?? [],
+                'settings' => $item['settings'] ?? [],
+                'items' => $item['items'] ?? [],
+            ];
+        }, Toolkit::list())));
+
+        return send($response, 'ok', $list);
+    }
+
     #[Action(methods: ['GET'], route: '/chat/{code}/sessions/{id}/messages')]
     public function sessionMessages(ServerRequestInterface $request, ResponseInterface $response, array $args): ResponseInterface
     {
@@ -300,6 +326,49 @@ class Agent extends Resources
             ->withHeader('Content-Encoding', 'none')
             ->withHeader('X-Accel-Buffering', 'no')
             ->withBody($stream);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeToolkits(mixed $toolkits): array
+    {
+        if (!is_array($toolkits)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($toolkits as $toolkit) {
+            if (!is_array($toolkit)) {
+                continue;
+            }
+            $code = strtolower(trim((string)($toolkit['toolkit'] ?? $toolkit['code'] ?? $toolkit['name'] ?? '')));
+            if ($code === '') {
+                continue;
+            }
+
+            $config = is_array($toolkit['config'] ?? null) ? ($toolkit['config'] ?? []) : [];
+            $overrides = [];
+            if (is_array($toolkit['overrides'] ?? null)) {
+                foreach (($toolkit['overrides'] ?? []) as $key => $value) {
+                    $overrideCode = trim((string)$key);
+                    if ($overrideCode === '' || !is_array($value)) {
+                        continue;
+                    }
+                    $overrides[$overrideCode] = $value;
+                }
+            }
+
+            $result[] = [
+                'toolkit' => $code,
+                'label' => trim((string)($toolkit['label'] ?? '')),
+                'description' => trim((string)($toolkit['description'] ?? '')),
+                'config' => $config,
+                'overrides' => $overrides,
+            ];
+        }
+
+        return $result;
     }
 
 }

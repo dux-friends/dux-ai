@@ -9,6 +9,21 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+
+
+## [0.3.1] - 2026-03-26
+
+- feat: 增加默认创建新会话按钮
+
+## [0.3.0] - 2026-03-25
+
+- feat: 增加工具集合配置
+
+## [0.2.5] - 2026-03-25
+
+- feat: 增加全局设置，增加编辑器 ai 接口
+
 ## [0.2.4] - 2026-03-25
 
 - fix: 文件解析驱动 bug

@@ -7,6 +7,7 @@ namespace App\Ai\Service\Rag;
 use App\Ai\Models\RagKnowledge;
 use App\Ai\Models\RagKnowledgeData;
 use App\Ai\Models\RegProvider;
+use App\Ai\Service\AiConfig;
 use App\Ai\Service\RagEngine;
 use Core\Handlers\ExceptionBusiness;
 use Psr\Http\Message\UploadedFileInterface;
@@ -20,10 +21,7 @@ final class Service
     public function syncKnowledge(string|int|RagKnowledge $knowledge): RagKnowledge
     {
         $model = KnowledgeResolver::resolve($knowledge, true);
-        $config = $model->config;
-        if (!$config) {
-            throw new ExceptionBusiness('知识库未配置服务商');
-        }
+        $this->requireKnowledgeConfig($model, true);
 
         try {
             RagEngine::ensureSynced($model);
@@ -38,7 +36,7 @@ final class Service
     {
         $model = KnowledgeResolver::resolve($knowledge, false);
 
-        $config = $model->config ?? $model->config()->first();
+        $config = $this->findKnowledgeConfig($model, true);
         $entries = RagKnowledgeData::query()->where('knowledge_id', $model->id)->get();
         foreach ($entries as $entry) {
             $this->removeRemoteContentIfNeeded($entry);
@@ -61,7 +59,7 @@ final class Service
     {
         $model = KnowledgeResolver::resolve($knowledge, false);
 
-        $config = $model->config ?? $model->config()->first();
+        $config = $this->findKnowledgeConfig($model, true);
         $entries = RagKnowledgeData::query()->where('knowledge_id', $model->id)->get();
 
         if ($config && $model->base_id && $model->is_async) {
@@ -84,6 +82,7 @@ final class Service
     public function importContent(string|int|RagKnowledge $knowledge, UploadedFileInterface $file, string $type = 'document', array $options = []): RagKnowledgeData
     {
         $model = KnowledgeResolver::resolve($knowledge);
+        $this->requireKnowledgeConfig($model, true);
         $contentType = self::normalizeContentType($type);
 
         return $contentType === 'qa'
@@ -105,10 +104,7 @@ final class Service
 
         $limit = max(1, min(50, $limit));
 
-        $config = $model->config;
-        if (!$config) {
-            throw new ExceptionBusiness('知识库未配置服务商');
-        }
+        $config = $this->requireKnowledgeConfig($model, true);
 
         if (!$model->base_id || !$model->is_async) {
             $this->syncKnowledge($model);
@@ -179,6 +175,8 @@ final class Service
 
     private function importDocumentContent(RagKnowledge $knowledge, UploadedFileInterface $uploadedFile, string $type, array $options = []): RagKnowledgeData
     {
+        $this->requireKnowledgeConfig($knowledge, true);
+
         $uploadError = $uploadedFile->getError();
         if ($uploadError !== UPLOAD_ERR_OK) {
             throw new ExceptionBusiness('导入文件上传失败：' . $this->uploadErrorMessage($uploadError));
@@ -227,6 +225,8 @@ final class Service
 
     private function importQaContent(RagKnowledge $knowledge, UploadedFileInterface $uploadedFile): RagKnowledgeData
     {
+        $this->requireKnowledgeConfig($knowledge, true);
+
         $uploadError = $uploadedFile->getError();
         if ($uploadError !== UPLOAD_ERR_OK) {
             throw new ExceptionBusiness('导入文件上传失败：' . $this->uploadErrorMessage($uploadError));
@@ -279,9 +279,7 @@ final class Service
 
     private function syncOrIndexContent(RagKnowledge $knowledge, RagKnowledgeData $record, string $contents, ?string $mime): void
     {
-        if (!$knowledge->config) {
-            throw new ExceptionBusiness('知识库未配置服务商');
-        }
+        $this->requireKnowledgeConfig($knowledge, true);
 
         $this->syncKnowledge($knowledge);
         if (!$knowledge->base_id) {
@@ -308,9 +306,7 @@ final class Service
      */
     private function syncOrIndexQaContent(RagKnowledge $knowledge, RagKnowledgeData $record, array $qaPairs): void
     {
-        if (!$knowledge->config) {
-            throw new ExceptionBusiness('知识库未配置服务商');
-        }
+        $this->requireKnowledgeConfig($knowledge, true);
 
         $this->syncKnowledge($knowledge);
         if (!$knowledge->base_id) {
@@ -349,7 +345,7 @@ final class Service
             return;
         }
 
-        $config = $knowledge->config ?? $knowledge->config()->first();
+        $config = $this->findKnowledgeConfig($knowledge, true);
         if (!$config) {
             return;
         }
@@ -388,5 +384,59 @@ final class Service
             UPLOAD_ERR_EXTENSION => '文件上传被 PHP 扩展中止',
             default => '未知错误（code=' . $error . ')',
         };
+    }
+
+    private function requireKnowledgeConfig(RagKnowledge $knowledge, bool $withStorage = true): RegProvider
+    {
+        $config = $this->findKnowledgeConfig($knowledge, $withStorage);
+        if ($config) {
+            return $config;
+        }
+
+        if ($knowledge->config_id) {
+            throw new ExceptionBusiness('当前知识库绑定的知识库引擎不存在或已删除');
+        }
+
+        $defaultId = (int)AiConfig::getValue('default_rag_provider_id', 0);
+        if ($defaultId <= 0) {
+            throw new ExceptionBusiness('请先配置默认知识库引擎或在知识库中手动选择知识库引擎');
+        }
+
+        throw new ExceptionBusiness('默认知识库引擎不存在或已删除');
+    }
+
+    private function findKnowledgeConfig(RagKnowledge $knowledge, bool $withStorage = true): ?RegProvider
+    {
+        if ($knowledge->config instanceof RegProvider) {
+            if ($withStorage && $knowledge->config->storage_id) {
+                $knowledge->config->loadMissing('storage');
+            }
+            return $knowledge->config;
+        }
+
+        if ($knowledge->config_id) {
+            $config = RegProvider::query()->find((int)$knowledge->config_id);
+            if ($config) {
+                if ($withStorage && $config->storage_id) {
+                    $config->loadMissing('storage');
+                }
+                $knowledge->setRelation('config', $config);
+            }
+            return $config;
+        }
+
+        $defaultId = (int)AiConfig::getValue('default_rag_provider_id', 0);
+        if ($defaultId <= 0) {
+            return null;
+        }
+
+        $config = RegProvider::query()->find($defaultId);
+        if ($config) {
+            if ($withStorage && $config->storage_id) {
+                $config->loadMissing('storage');
+            }
+            $knowledge->setRelation('config', $config);
+        }
+        return $config;
     }
 }

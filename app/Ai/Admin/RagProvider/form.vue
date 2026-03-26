@@ -59,14 +59,15 @@ const model = ref({
             placeholder="请选择向量库"
           />
         </DuxFormItem>
-        <DuxFormItem label="向量模型" required>
+        <DuxFormItem label="Embeddings 模型" description="留空则使用系统默认 Embeddings 模型">
           <DuxSelect
             v-model:value="model.embedding_model_id"
             path="ai/model"
             :params="{tab: 'embedding'}"
             label-field="name"
             value-field="id"
-            placeholder="请选择向量模型"
+            placeholder="留空则使用系统默认 Embeddings 模型"
+            clearable
           />
         </DuxFormItem>
       </DuxFormLayout>

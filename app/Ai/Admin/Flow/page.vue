@@ -29,6 +29,8 @@ function createEmptyFlowState() {
 
 const flowState = shallowRef(createEmptyFlowState())
 const globalSettingsState = ref(createDefaultGlobalSettings())
+const optionsLoaded = ref(false)
+let optionsLoadingPromise = null
 
 const optionState = shallowRef({
   providers: [],
@@ -525,11 +527,25 @@ async function loadOptions() {
     functions: res.data?.functions || [],
     nodes: Array.isArray(res.data?.nodes) ? res.data.nodes : [],
   }
+  optionsLoaded.value = true
+}
+
+async function ensureOptionsLoaded() {
+  if (optionsLoaded.value) {
+    return
+  }
+  if (!optionsLoadingPromise) {
+    optionsLoadingPromise = loadOptions().finally(() => {
+      optionsLoadingPromise = null
+    })
+  }
+  await optionsLoadingPromise
 }
 
 async function loadDetail() {
   if (!id.value)
     return
+  await ensureOptionsLoaded()
   const res = await requestClient.mutateAsync({
     path: `ai/flow/${id.value}`,
     method: 'GET',
@@ -549,7 +565,7 @@ async function loadDetail() {
 }
 
 onMounted(() => {
-  loadOptions()
+  ensureOptionsLoaded()
 })
 
 whenever(id, () => {
@@ -733,6 +749,7 @@ async function handleSave(nextFlow) {
 
 <template>
   <DuxFlowEditor
+    v-if="optionsLoaded"
     v-model:value="flowState"
     :custom-nodes="customNodes"
     :categories="categories"

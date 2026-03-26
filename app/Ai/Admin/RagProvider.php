@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Admin;
 
 use App\Ai\Models\RegProvider as RegProviderModel;
+use App\Ai\Service\AiConfig;
 use App\Ai\Service\CodeGenerator;
 use Core\Resources\Action\Resources;
 use Core\Resources\Attribute\Resource;
@@ -46,7 +47,6 @@ class RagProvider extends Resources
             'name' => ['required', '请输入配置名称'],
             'storage_id' => ['required', '请选择存储驱动'],
             'vector_id' => ['required', '请选择向量库'],
-            'embedding_model_id' => ['required', '请选择 Embeddings 模型'],
         ];
     }
 
@@ -65,6 +65,10 @@ class RagProvider extends Resources
                     return $query->exists();
                 },
             );
+        $embeddingModelId = $data->embedding_model_id ? (int)$data->embedding_model_id : (int)AiConfig::getValue('default_embedding_model_id', 0);
+        if ($embeddingModelId <= 0) {
+            $embeddingModelId = null;
+        }
 
         return [
             'name' => (string)$data->name,
@@ -72,7 +76,7 @@ class RagProvider extends Resources
             'provider' => 'neuron',
             'storage_id' => (int)$data->storage_id,
             'vector_id' => (int)$data->vector_id,
-            'embedding_model_id' => (int)$data->embedding_model_id,
+            'embedding_model_id' => $embeddingModelId,
             'description' => $data->description ?: null,
             'config' => [],
         ];

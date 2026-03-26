@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Service\Rag;
 
 use App\Ai\Models\RagKnowledge;
+use App\Ai\Service\AiConfig;
 use App\Ai\Service\FileDataLoader;
 use App\Ai\Support\AiRuntime;
 use App\System\Service\Storage as StorageService;
@@ -210,7 +211,10 @@ final class AssetDocumentBuilder
             $parseProvider = $cfg['parse_provider'] ?? null;
             $fileExt = strtolower((string)pathinfo($tmp, PATHINFO_EXTENSION));
             if (($parseProvider === null || $parseProvider === '') && in_array($fileExt, ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'], true)) {
-                throw new ExceptionBusiness('当前文件类型需要先配置解析配置（parse_provider），当前值为空');
+                $parseProvider = AiConfig::getValue('default_parse_provider_id');
+            }
+            if (($parseProvider === null || $parseProvider === '') && in_array($fileExt, ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'], true)) {
+                throw new ExceptionBusiness('当前文件类型需要解析配置，请先配置默认解析配置或在知识库中单独指定');
             }
 
             $context = array_filter([

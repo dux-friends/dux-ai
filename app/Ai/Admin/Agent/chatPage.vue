@@ -27,6 +27,7 @@ interface StreamStatus {
 const props = defineProps<{
   code?: string
   sessionId?: number | null
+  embedded?: boolean
 }>()
 
 const route = useRoute()
@@ -45,8 +46,8 @@ const routeAgentCode = computed(() => {
   const queryVal = route.query?.code
   const value = paramVal ?? queryVal
   if (Array.isArray(value))
-    return value[0]
-  return typeof value === 'string' ? value : ''
+    return value[0] || undefined
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined
 })
 
 const routeSessionId = computed<number | null>(() => {
@@ -57,7 +58,8 @@ const routeSessionId = computed<number | null>(() => {
 })
 
 function resolveInitialAgentCode() {
-  return props.code || routeAgentCode.value || ''
+  const code = props.code || routeAgentCode.value
+  return code && code.trim() !== '' ? code : undefined
 }
 
 function resolveInitialSessionId(): number | null {
@@ -65,7 +67,7 @@ function resolveInitialSessionId(): number | null {
   return candidate && Number.isFinite(Number(candidate)) ? Number(candidate) : null
 }
 
-const agentCode = ref(resolveInitialAgentCode())
+const agentCode = ref<string | undefined>(resolveInitialAgentCode())
 const preferredSessionId = ref<number | null>(resolveInitialSessionId())
 
 const sessions = ref<any[]>([])
@@ -95,6 +97,8 @@ const SESSION_BUSY_MESSAGE = '当前会话正在处理中，请等待本轮完�
 const MESSAGE_POLL_INTERVAL = 3000
 const MESSAGE_FULL_SYNC_EVERY = 4
 const messagePollCount = ref(0)
+let availableAgentsTask: Promise<void> | null = null
+let bootstrapAgentTask: Promise<void> | null = null
 
 function headers() {
   const h: Record<string, string> = {
@@ -1132,32 +1136,38 @@ function handleInputKeydown(event: KeyboardEvent) {
 }
 
 async function loadAvailableAgents() {
+  if (availableAgentsTask) {
+    return availableAgentsTask
+  }
+
   loadingAgents.value = true
-  try {
-    const res = await requestClient.mutateAsync({
-      path: 'ai/agent',
-      method: 'GET',
-    })
+  availableAgentsTask = requestClient.mutateAsync({
+    path: 'ai/agent',
+    method: 'GET',
+  }).then((res) => {
     const list = Array.isArray(res?.data?.data) ? res.data.data : Array.isArray(res?.data) ? res.data : []
     availableAgents.value = list
     applyAttachmentSupport()
-  }
-  catch (err: any) {
+  }).catch((err: any) => {
     message.error(err?.message || '加载智能体列表失败')
-  }
-  finally {
+  }).finally(() => {
     loadingAgents.value = false
-  }
+    availableAgentsTask = null
+  })
+
+  return availableAgentsTask
 }
 
-function switchAgent(code: string) {
+function switchAgent(code?: string) {
+  if (!code)
+    return
   if (code === agentCode.value)
     return
   preferredSessionId.value = null
   agentCode.value = code
 }
 
-function openAgentSelector() {
+function showAgentSelector() {
   if (sending.value || !availableAgents.value.length)
     return
   dialog.prompt({
@@ -1180,11 +1190,59 @@ function openAgentSelector() {
       },
     ],
   }).then(async (values: Record<string, any>) => {
-    const nextCode = String(values?.agent ?? '').trim()
+    const nextCode = String(values?.agent ?? '').trim() || undefined
     if (nextCode && nextCode !== agentCode.value) {
       switchAgent(nextCode)
     }
   }).catch(() => {})
+}
+
+function bootstrapAgent() {
+  if (bootstrapAgentTask) {
+    return bootstrapAgentTask
+  }
+  bootstrapAgentTask = requestClient.mutateAsync({
+    path: `${apiBase}/sessions`,
+    method: 'GET',
+    query: {
+      limit: 20,
+    },
+  }).then((res) => {
+    const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res?.data?.data) ? res.data.data : [])
+    const firstSession = Array.isArray(list) ? list.find((item: any) => item?.agent_code) : null
+    if (firstSession?.agent_code) {
+      preferredSessionId.value = Number(firstSession.id || 0) || null
+      agentCode.value = String(firstSession.agent_code)
+      return
+    }
+
+    return loadAvailableAgents().then(() => {
+      const firstAgent = availableAgents.value[0]
+      if (firstAgent?.code) {
+        agentCode.value = String(firstAgent.code)
+      }
+    })
+  }).finally(() => {
+    bootstrapAgentTask = null
+  })
+
+  return bootstrapAgentTask
+}
+
+function openAgentSelector() {
+  if (sending.value)
+    return
+  if (!availableAgents.value.length) {
+    loadAvailableAgents().then(() => {
+      if (!availableAgents.value.length) {
+        message.warning('暂无可选智能体')
+        return
+      }
+      showAgentSelector()
+    })
+    return
+  }
+  showAgentSelector()
 }
 
 onBeforeUnmount(() => {
@@ -1193,7 +1251,7 @@ onBeforeUnmount(() => {
 })
 
 watch(() => [props.code, routeAgentCode.value], ([propCode, queryCode]) => {
-  const next = propCode || queryCode || ''
+  const next = propCode || queryCode || undefined
   if (next && agentCode.value !== next) {
     agentCode.value = next
   }
@@ -1207,7 +1265,7 @@ watch(() => [props.sessionId, routeSessionId.value], () => {
 }, { immediate: true })
 
 watch(agentCode, (code, prev) => {
-  if (prev === code)
+  if (prev === code && prev !== undefined)
     return
   handleAbort()
   chatHistory.value = []
@@ -1219,7 +1277,7 @@ watch(agentCode, (code, prev) => {
     })
   }
   else {
-    loadAvailableAgents()
+    bootstrapAgent()
   }
 }, { immediate: true })
 
@@ -1241,7 +1299,7 @@ watch(activeSessionId, (val, prev) => {
 </script>
 
 <template>
-  <DuxPage :scrollbar="false" :padding="false">
+  <component :is="props.embedded ? 'div' : DuxPage" v-bind="props.embedded ? {} : { scrollbar: false, padding: false }" class="h-full">
     <div class="h-full flex flex-col">
       <!-- 主体内容区 -->
       <div class="flex-1 flex min-h-0 relative">
@@ -1319,13 +1377,13 @@ watch(activeSessionId, (val, prev) => {
               </div>
               <div v-else class="space-y-3">
                 <div class="text-sm text-muted">
-                  未选择智能体
+                  {{ loadingAgents ? '正在加载智能体' : '请选择智能体' }}
                 </div>
-                <NButton size="small" @click="loadAvailableAgents">
+                <NButton size="small" type="primary" @click="openAgentSelector">
                   <template #icon>
-                    <i class="i-tabler:refresh" />
+                    <i class="i-tabler:robot" />
                   </template>
-                  加载智能体
+                  选择智能体
                 </NButton>
               </div>
             </div>
@@ -1890,7 +1948,7 @@ watch(activeSessionId, (val, prev) => {
         </div>
       </div>
     </div>
-  </DuxPage>
+  </component>
 </template>
 
 <style scoped>

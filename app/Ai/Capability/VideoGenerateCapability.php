@@ -9,6 +9,7 @@ use App\Ai\Interface\CapabilityContextInterface;
 use App\Ai\Models\AiModel;
 use App\Ai\Models\AiProvider;
 use App\Ai\Service\AI;
+use App\Ai\Service\AiConfig;
 use App\Ai\Service\Neuron\Provider\Video\VideoTaskProviderInterface;
 use App\Ai\Service\Neuron\Video\VideoProvider;
 use App\Ai\Service\Scheduler\AiSchedulerService;
@@ -34,7 +35,10 @@ final class VideoGenerateCapability
     {
         $modelId = (int)($input['model_id'] ?? 0);
         if ($modelId <= 0) {
-            throw new ExceptionBusiness('视频工具缺少 model_id 配置');
+            $modelId = (int)AiConfig::getValue('default_video_model_id', 0);
+        }
+        if ($modelId <= 0) {
+            throw new ExceptionBusiness('视频工具缺少 model_id 配置，请先在 AI 系统设置中设置默认视频模型');
         }
 
         /** @var AiModel|null $model */

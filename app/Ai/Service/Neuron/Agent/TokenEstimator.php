@@ -51,6 +51,39 @@ final class TokenEstimator
     }
 
     /**
+     * @param array<string, mixed> $modelOptions
+     * @param array<string, mixed> $extra
+     * @return array{
+     *     input_tokens: int,
+     *     output_tokens: int,
+     *     extra_tokens: int,
+     *     safety_margin: int,
+     *     total: int
+     * }
+     */
+    public static function estimateTextBudget(
+        string $prompt,
+        ?string $systemPrompt = null,
+        array $modelOptions = [],
+        array $extra = [],
+    ): array {
+        $inputTokens = self::estimateText($prompt) + self::estimateText((string)$systemPrompt);
+        $extraText = $extra === [] ? '' : (json_encode($extra, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+        $extraTokens = self::estimateText($extraText);
+        $outputTokens = self::resolveOutputReserve([], $modelOptions);
+        $base = max(1, $inputTokens + $extraTokens + $outputTokens);
+        $safetyMargin = max(200, (int)ceil($base * 0.15));
+
+        return [
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'extra_tokens' => $extraTokens,
+            'safety_margin' => $safetyMargin,
+            'total' => $base + $safetyMargin,
+        ];
+    }
+
+    /**
      * @param array<string, array<string, mixed>> $toolMap
      */
     private static function estimateToolOverhead(array $toolMap): int

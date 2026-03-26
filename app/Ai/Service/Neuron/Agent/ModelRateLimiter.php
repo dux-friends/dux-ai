@@ -7,6 +7,7 @@ namespace App\Ai\Service\Neuron\Agent;
 use App\Ai\Models\AiAgent;
 use App\Ai\Models\AiModel;
 use App\Ai\Models\AiProvider;
+use App\Ai\Service\AiConfig;
 use App\Ai\Support\AiRuntime;
 use Core\App;
 use Psr\SimpleCache\CacheInterface;
@@ -38,58 +39,25 @@ final class ModelRateLimiter
             return self::disabledReservation();
         }
 
-        $limit = self::resolveTpmLimit($model);
-        if ($limit <= 0 || $requestedTokens <= 0) {
-            return self::disabledReservation(self::modelKey($model));
-        }
+        return self::acquireForResolvedModel($model, $requestedTokens, true);
+    }
 
-        $modelKey = self::modelKey($model);
-        $maxWaitMs = self::resolveMaxWaitMs($model);
-        $deadline = microtime(true) + ($maxWaitMs / 1000);
-        $waitedMs = 0;
-        $forced = false;
-
-        while (true) {
-            $state = self::readState($modelKey);
-            $used = self::sumTokens($state);
-            if ($used + $requestedTokens <= $limit) {
-                $reservationId = self::appendReservation($modelKey, $state, $requestedTokens);
-                return [
-                    'enabled' => true,
-                    'model_key' => $modelKey,
-                    'reservation_id' => $reservationId,
-                    'limit' => $limit,
-                    'requested_tokens' => $requestedTokens,
-                    'used_tokens' => $used,
-                    'waited_ms' => $waitedMs,
-                    'forced' => false,
-                ];
-            }
-
-            $waitMs = self::nextWaitMs($state);
-            if ($waitMs <= 0) {
-                $waitMs = 200;
-            }
-
-            $remainingMs = max(0, (int)ceil(($deadline - microtime(true)) * 1000));
-            if ($remainingMs <= 0 || $waitMs > $remainingMs) {
-                $forced = true;
-                $reservationId = self::appendReservation($modelKey, $state, $requestedTokens);
-                return [
-                    'enabled' => true,
-                    'model_key' => $modelKey,
-                    'reservation_id' => $reservationId,
-                    'limit' => $limit,
-                    'requested_tokens' => $requestedTokens,
-                    'used_tokens' => $used,
-                    'waited_ms' => $waitedMs,
-                    'forced' => true,
-                ];
-            }
-
-            usleep($waitMs * 1000);
-            $waitedMs += $waitMs;
-        }
+    /**
+     * @return array{
+     *     enabled: bool,
+     *     model_key: string,
+     *     reservation_id: string,
+     *     limit: int,
+     *     requested_tokens: int,
+     *     used_tokens: int,
+     *     waited_ms: int,
+     *     forced: bool
+     * }
+     */
+    public static function acquireForModel(AiModel $model, int $requestedTokens): array
+    {
+        $model->loadMissing('provider');
+        return self::acquireForResolvedModel($model, $requestedTokens, false);
     }
 
     public static function finalize(array $reservation, int $actualTokens): void
@@ -148,6 +116,75 @@ final class ModelRateLimiter
         ];
         self::writeState($modelKey, $state);
         return $reservationId;
+    }
+
+    /**
+     * @return array{
+     *     enabled: bool,
+     *     model_key: string,
+     *     reservation_id: string,
+     *     limit: int,
+     *     requested_tokens: int,
+     *     used_tokens: int,
+     *     waited_ms: int,
+     *     forced: bool
+     * }
+     */
+    private static function acquireForResolvedModel(AiModel $model, int $requestedTokens, bool $forceOnTimeout): array
+    {
+        $limit = self::resolveTpmLimit($model);
+        if ($limit <= 0 || $requestedTokens <= 0) {
+            return self::disabledReservation(self::modelKey($model));
+        }
+
+        $modelKey = self::modelKey($model);
+        $maxWaitMs = self::resolveMaxWaitMs($model);
+        $deadline = microtime(true) + ($maxWaitMs / 1000);
+        $waitedMs = 0;
+
+        while (true) {
+            $state = self::readState($modelKey);
+            $used = self::sumTokens($state);
+            if ($used + $requestedTokens <= $limit) {
+                $reservationId = self::appendReservation($modelKey, $state, $requestedTokens);
+                return [
+                    'enabled' => true,
+                    'model_key' => $modelKey,
+                    'reservation_id' => $reservationId,
+                    'limit' => $limit,
+                    'requested_tokens' => $requestedTokens,
+                    'used_tokens' => $used,
+                    'waited_ms' => $waitedMs,
+                    'forced' => false,
+                ];
+            }
+
+            $waitMs = self::nextWaitMs($state);
+            if ($waitMs <= 0) {
+                $waitMs = 200;
+            }
+
+            $remainingMs = max(0, (int)ceil(($deadline - microtime(true)) * 1000));
+            if ($remainingMs <= 0 || $waitMs > $remainingMs) {
+                if (!$forceOnTimeout) {
+                    throw new \Core\Handlers\ExceptionBusiness('当前模型请求较多，请稍后重试');
+                }
+                $reservationId = self::appendReservation($modelKey, $state, $requestedTokens);
+                return [
+                    'enabled' => true,
+                    'model_key' => $modelKey,
+                    'reservation_id' => $reservationId,
+                    'limit' => $limit,
+                    'requested_tokens' => $requestedTokens,
+                    'used_tokens' => $used,
+                    'waited_ms' => $waitedMs,
+                    'forced' => true,
+                ];
+            }
+
+            usleep($waitMs * 1000);
+            $waitedMs += $waitMs;
+        }
     }
 
     /**
@@ -228,6 +265,7 @@ final class ModelRateLimiter
             $rateLimit['tokens_per_minute'] ?? null,
             $options['tpm'] ?? null,
             $options['tokens_per_minute'] ?? null,
+            AiConfig::getValue('rate_limit.tpm'),
         ];
 
         foreach ($candidates as $candidate) {
@@ -243,7 +281,9 @@ final class ModelRateLimiter
     {
         $options = is_array($model->options ?? null) ? ($model->options ?? []) : [];
         $rateLimit = is_array($options['rate_limit'] ?? null) ? ($options['rate_limit'] ?? []) : [];
-        $candidate = $rateLimit['max_wait_ms'] ?? $options['rate_limit_max_wait_ms'] ?? 8000;
+        $candidate = $rateLimit['max_wait_ms']
+            ?? $options['rate_limit_max_wait_ms']
+            ?? AiConfig::getValue('rate_limit.max_wait_ms', 8000);
         if (!is_numeric($candidate)) {
             return 8000;
         }

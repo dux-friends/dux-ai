@@ -24,7 +24,7 @@ class RagKnowledge extends Model
     public function migration(Blueprint $table): void
     {
         $table->id();
-        $table->unsignedBigInteger('config_id')->comment('配置 ID');
+        $table->unsignedBigInteger('config_id')->nullable()->comment('配置 ID');
         $table->string('name')->comment('知识库名称');
         $table->string('base_id')->nullable()->comment('远端知识库 ID');
         $table->text('description')->nullable()->comment('说明');

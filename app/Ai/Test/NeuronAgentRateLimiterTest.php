@@ -1,7 +1,10 @@
 <?php
 
+use App\Ai\Models\AiModel;
+use App\Ai\Models\AiProvider;
 use App\Ai\Service\Neuron\Agent\ModelRateLimiter;
 use App\Ai\Service\Neuron\Agent\TokenEstimator;
+use Core\Handlers\ExceptionBusiness;
 
 it('TokenEstimator：估算聊天预算并包含工具与安全余量', function () {
     $budget = TokenEstimator::estimateChatBudget(
@@ -63,4 +66,23 @@ it('ModelRateLimiter：可预占并按实际 token 回填', function () {
         ->and($snapshot['reservations'])->toBe(1);
 
     ModelRateLimiter::clear($reservation['model_key']);
+});
+
+it('ModelRateLimiter：普通模型调用超出等待时间时会直接报忙而不是强行放行', function () {
+    $provider = new AiProvider();
+    $provider->code = 'test-provider-generic';
+
+    $model = new AiModel();
+    $model->code = 'test-model-generic';
+    $model->model = 'remote';
+    $model->provider_id = 1;
+    $model->options = ['rate_limit' => ['tpm' => 1000, 'max_wait_ms' => 0]];
+    $model->setRelation('provider', $provider);
+
+    $first = ModelRateLimiter::acquireForModel($model, 700);
+
+    expect(fn () => ModelRateLimiter::acquireForModel($model, 400))
+        ->toThrow(ExceptionBusiness::class, '当前模型请求较多，请稍后重试');
+
+    ModelRateLimiter::clear($first['model_key']);
 });

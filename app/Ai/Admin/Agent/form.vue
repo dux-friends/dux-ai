@@ -6,6 +6,9 @@ import { NButton, NInput, NInputNumber, NSwitch, NTabPane, NTag } from 'naive-ui
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
+  applyToolkitMeta,
+  buildToolkitPayload,
+  createToolkitItem,
   buildToolPayload,
   createToolItem,
   ensureToolSchema,
@@ -48,6 +51,7 @@ interface SkillOption {
 }
 
 const toolRegistry = ref<Record<string, any>>({})
+const toolkitRegistry = ref<Record<string, any>>({})
 const botOptions = ref<BotOption[]>([])
 const botLoading = ref(false)
 const skillOptions = ref<SkillOption[]>([])
@@ -100,6 +104,18 @@ function resolveToolStyle(tool: any) {
   }
 }
 
+function resolveToolkitStyle(toolkit: any) {
+  const code = String(toolkit?.toolkit || toolkit?.code || '')
+  const meta = code ? toolkitRegistry.value[code] : null
+  const color = String(meta?.color || toolkit?.color || '').trim() || defaultToolStyle.color
+  const visualClass = deriveVisualClassFromColor(color)
+  return {
+    icon: String(meta?.icon || toolkit?.icon || '').trim() || 'i-tabler:tool',
+    iconClass: visualClass.iconClass,
+    bgClass: normalizeIconBgClass(visualClass.bgClass, defaultToolStyle.bgClass),
+  }
+}
+
 const model = ref<Record<string, any>>({
   name: undefined,
   code: undefined,
@@ -113,6 +129,7 @@ const model = ref<Record<string, any>>({
     debug_enabled: false,
     bot_codes: undefined,
     skill_codes: undefined,
+    toolkits: [],
   },
   active: true,
   description: undefined,
@@ -131,6 +148,21 @@ async function loadToolRegistry() {
       map[String(code)] = item
   })
   toolRegistry.value = map
+}
+
+async function loadToolkitRegistry() {
+  const res = await request.mutateAsync({
+    path: 'ai/agent/toolkit',
+    method: 'GET',
+  })
+  const list = Array.isArray(res.data) ? res.data : []
+  const map: Record<string, any> = {}
+  list.forEach((item: any) => {
+    const code = item.code || item.value
+    if (code)
+      map[String(code)] = item
+  })
+  toolkitRegistry.value = map
 }
 
 function ensureSettingsContainer() {
@@ -175,6 +207,16 @@ function setCurrentBotCodes(codes: string[]) {
 function setCurrentSkillCodes(codes: string[]) {
   ensureSettingsContainer()
   model.value.settings.skill_codes = codes.length ? [...new Set(codes)] : undefined
+}
+
+function getCurrentToolkits(): any[] {
+  ensureSettingsContainer()
+  return Array.isArray(model.value?.settings?.toolkits) ? model.value.settings.toolkits : []
+}
+
+function setCurrentToolkits(toolkits: any[]) {
+  ensureSettingsContainer()
+  model.value.settings.toolkits = toolkits
 }
 
 async function loadBotOptions() {
@@ -401,6 +443,14 @@ function normalizeToolForEdit(item: any) {
   return base
 }
 
+function normalizeToolkitForEdit(item: any) {
+  const base = { ...createToolkitItem(), ...toPlain(item) }
+  const meta = base.toolkit ? toolkitRegistry.value[String(base.toolkit)] : null
+  if (meta)
+    applyToolkitMeta(base, toolkitRegistry.value, base.toolkit)
+  return base
+}
+
 async function openToolModal(tool?: any, index: number | null = null) {
   const draft = normalizeToolForEdit(tool || createToolItem())
   try {
@@ -446,14 +496,76 @@ function removeTool(index: number) {
   model.value.tools = tools
 }
 
+async function openToolkitModal(toolkit?: any, index: number | null = null) {
+  const draft = normalizeToolkitForEdit(toolkit || createToolkitItem())
+  try {
+    const result = await drawer.show({
+      title: '工具包配置',
+      width: 860,
+      component: () => import('./components/ToolkitConfigDrawer.vue'),
+      componentProps: {
+        toolkit: draft,
+        toolkitRegistry: toolkitRegistry.value,
+      },
+    })
+    if (!result)
+      return
+
+    const payload = buildToolkitPayload(result)
+    const toolkits = toPlain(getCurrentToolkits())
+    if (index === null || index < 0)
+      toolkits.push(payload)
+    else
+      toolkits.splice(index, 1, payload)
+    setCurrentToolkits(toolkits)
+  }
+  catch {
+    // ignore
+  }
+}
+
+const openCreateToolkit = () => openToolkitModal(null, null)
+
+function openEditToolkit(index: number) {
+  const existing = getCurrentToolkits()[index]
+  if (!existing)
+    return
+  openToolkitModal(existing, index)
+}
+
+function removeToolkit(index: number) {
+  const toolkits = toPlain(getCurrentToolkits())
+  toolkits.splice(index, 1)
+  setCurrentToolkits(toolkits)
+}
+
 function resolveToolLabel(tool: any) {
   const meta = tool?.code ? toolRegistry.value[String(tool.code)] : null
   return meta?.label || meta?.name || tool?.code || '能力'
 }
 
+function resolveToolkitLabel(toolkit: any) {
+  const code = toolkit?.toolkit ? String(toolkit.toolkit) : ''
+  const meta = code ? toolkitRegistry.value[code] : null
+  return meta?.label || toolkit?.label || code || '工具包'
+}
+
+function resolveToolkitDescription(toolkit: any) {
+  const code = toolkit?.toolkit ? String(toolkit.toolkit) : ''
+  const meta = code ? toolkitRegistry.value[code] : null
+  return meta?.description || toolkit?.description || '点击配置共享默认值和单项覆盖'
+}
+
+function resolveToolkitItems(toolkit: any) {
+  const code = toolkit?.toolkit ? String(toolkit.toolkit) : ''
+  const meta = code ? toolkitRegistry.value[code] : null
+  return Array.isArray(meta?.items) ? meta.items : []
+}
+
 onMounted(async () => {
   await Promise.allSettled([
     loadToolRegistry(),
+    loadToolkitRegistry(),
     loadBotOptions(),
     loadSkillOptions(),
   ])
@@ -693,6 +805,76 @@ onMounted(async () => {
               </NTag>
             </div>
             <NButton quaternary circle @click.stop="removeTool(Number(index))">
+              <template #icon>
+                <i class="i-tabler:trash" />
+              </template>
+            </NButton>
+          </div>
+        </div>
+      </div>
+    </NTabPane>
+
+    <NTabPane name="toolkit" label="工具包配置">
+      <div class="pb-4 max-w-4xl mx-auto">
+        <div class="flex items-center justify-between py-4">
+          <div>
+            <div class="text-base font-medium">工具包绑定</div>
+            <div class="text-sm text-muted mt-1">按业务域一次性绑定一组能力，并设置共享默认值与单项覆盖</div>
+          </div>
+          <NButton secondary type="primary" @click="openCreateToolkit">
+            <template #icon>
+              <i class="i-tabler:plus" />
+            </template>
+            添加工具包
+          </NButton>
+        </div>
+
+        <div
+          v-if="!getCurrentToolkits().length"
+          class="border border-dashed border-muted rounded-lg py-12 text-center"
+        >
+          <i class="i-tabler:tool text-3xl text-muted" />
+          <div class="text-sm text-muted mt-3 mb-2">暂未绑定工具包</div>
+          <NButton type="primary" ghost @click="openCreateToolkit">
+            添加工具包
+          </NButton>
+        </div>
+
+        <div v-else class="border border-muted rounded-lg overflow-hidden">
+          <div
+            v-for="(toolkit, index) in getCurrentToolkits()"
+            :key="`${toolkit.toolkit || toolkit.code}-${index}`"
+            class="flex items-start gap-4 p-4 hover:bg-fill transition-colors cursor-pointer"
+            :class="{ 'border-t border-muted': Number(index) > 0 }"
+            @click="openEditToolkit(Number(index))"
+          >
+            <div class="size-12 rounded-lg flex items-center justify-center flex-shrink-0" :class="resolveToolkitStyle(toolkit).bgClass">
+              <i class="size-6" :class="[resolveToolkitStyle(toolkit).icon, resolveToolkitStyle(toolkit).iconClass]" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-base font-medium truncate">{{ resolveToolkitLabel(toolkit) }}</span>
+                <NTag type="default" round>
+                  {{ toolkit.toolkit || toolkit.code }}
+                </NTag>
+              </div>
+              <div class="text-sm text-muted mt-0.5">{{ resolveToolkitDescription(toolkit) }}</div>
+              <div class="flex flex-wrap gap-2 mt-3">
+                <NTag
+                  v-for="item in resolveToolkitItems(toolkit).slice(0, 6)"
+                  :key="item.code || item.label"
+                  size="small"
+                  type="default"
+                  round
+                >
+                  {{ item.label || item.code }}
+                </NTag>
+                <NTag v-if="resolveToolkitItems(toolkit).length > 6" size="small" type="default" round>
+                  +{{ resolveToolkitItems(toolkit).length - 6 }}
+                </NTag>
+              </div>
+            </div>
+            <NButton quaternary circle @click.stop="removeToolkit(Number(index))">
               <template #icon>
                 <i class="i-tabler:trash" />
               </template>

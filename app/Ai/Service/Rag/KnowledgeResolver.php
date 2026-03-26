@@ -23,12 +23,13 @@ final class KnowledgeResolver
             throw new ExceptionBusiness('知识库不存在');
         }
 
-        $model->loadMissing('config.storage');
-        if (!$model->config) {
-            throw new ExceptionBusiness('知识库未配置服务商');
+        if ($model->config_id || $model->relationLoaded('config')) {
+            $model->loadMissing('config');
+            if ($withStorage && $model->config?->storage_id) {
+                $model->config->loadMissing('storage');
+            }
         }
 
         return $model;
     }
 }
-
