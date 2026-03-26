@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+## [0.0.11] - 2026-03-26
+
+- fix: 修正安装器 bug
+
 ## [0.0.10] - 2026-03-21
 
 - Update

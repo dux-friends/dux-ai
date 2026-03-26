@@ -158,33 +158,12 @@ class InstallService
 
     public function runComposerInstall(OutputInterface $output): void
     {
-        try {
-            $phpBinary = RuntimeService::phpBinary();
-            $composerScript = RuntimeService::composerScript(base_path());
-        } catch (\Throwable $e) {
-            throw new ExceptionBusiness($e->getMessage());
-        }
-        $output->writeln('[env] php cli: ' . $phpBinary);
-        $output->writeln('[env] composer: ' . $composerScript);
+        $this->runComposerCommand($output, 'install');
+    }
 
-        $output->writeln('[env] composer args: install --no-interaction --no-progress --ignore-platform-req=ext-*');
-
-        $process = new Process([
-            $phpBinary,
-            $composerScript,
-            'install',
-            '--no-interaction',
-            '--no-progress',
-            '--ignore-platform-req=ext-*',
-        ], base_path());
-        $process->setTimeout(ConfigService::getCommandTimeout());
-        $process->run(function ($type, $buffer) use ($output): void {
-            $output->write($buffer);
-        });
-
-        if (!$process->isSuccessful()) {
-            throw new ProcessFailedException($process);
-        }
+    public function runComposerUpdate(OutputInterface $output): void
+    {
+        $this->runComposerCommand($output, 'update');
     }
 
     public function syncDatabase(OutputInterface $output): void
@@ -205,6 +184,41 @@ class InstallService
         $status = $command->run(new ArrayInput([]), $output);
         if ($status !== Command::SUCCESS) {
             throw new ExceptionBusiness('Menu sync failed');
+        }
+    }
+
+    private function runComposerCommand(OutputInterface $output, string $command): void
+    {
+        try {
+            $phpBinary = RuntimeService::phpBinary();
+            $composerScript = RuntimeService::composerScript(base_path());
+        } catch (\Throwable $e) {
+            throw new ExceptionBusiness($e->getMessage());
+        }
+
+        $args = [
+            $command,
+            '--no-interaction',
+            '--no-progress',
+            '--ignore-platform-req=ext-*',
+        ];
+
+        $output->writeln('[env] php cli: ' . $phpBinary);
+        $output->writeln('[env] composer: ' . $composerScript);
+        $output->writeln('[env] composer args: ' . implode(' ', $args));
+
+        $process = new Process([
+            $phpBinary,
+            $composerScript,
+            ...$args,
+        ], base_path());
+        $process->setTimeout(ConfigService::getCommandTimeout());
+        $process->run(function ($type, $buffer) use ($output): void {
+            $output->write($buffer);
+        });
+
+        if (!$process->isSuccessful()) {
+            throw new ProcessFailedException($process);
         }
     }
 
